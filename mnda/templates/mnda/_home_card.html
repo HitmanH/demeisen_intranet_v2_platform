@@ -1,0 +1,2 @@
+<div class="card"><h2>NDAs in progress</h2><table>{% for n in ndas %}
+<tr><td><a href="/nda/{{n.id}}">{{ n.ref }}</a></td><td>{{ n.counterparty }}</td><td><span class="pill">{{ n.status }}</span></td></tr>{% endfor %}</table></div>

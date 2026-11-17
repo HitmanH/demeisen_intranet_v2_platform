@@ -1,0 +1,53 @@
+# Changes the platform data stack (database, files, audit trail, backups, network). Run by hand only, and only after approval in the GitHub
+# "data" environment. In live phase the stack policy refuses anything that would replace or delete the database.
+name: Deploy data
+on:
+  workflow_dispatch:
+    inputs:
+      phase: { description: 'test (a copy) or live', type: choice, options: [keep, test, live], default: keep }
+      source_snapshot: { description: 'Snapshot to (re)create the database from. Blank: keep. Test phase only.', required: false }
+      admin_endpoint: { description: 'Secrets Manager endpoint for the one-time bootstrap', type: choice, options: [keep, 'on', 'off'], default: keep }
+      alert_email: { description: 'Alert address (blank: keep)', required: false }
+permissions: { id-token: write, contents: read }
+concurrency: data
+env:
+  AWS_REGION: eu-west-2
+  STACK: demeisen-v2-platform-data
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: data
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install -q cfn-lint pyyaml && cfn-lint data/data.yaml && python3 tools/check-guardrails.py data/data.yaml
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/demeisen-v2-github-platform-data
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Deploy
+        env:
+          PHASE: ${{ inputs.phase }}
+          SNAP: ${{ inputs.source_snapshot }}
+          ADMIN: ${{ inputs.admin_endpoint }}
+          EMAIL: ${{ inputs.alert_email }}
+        run: |
+          set -euo pipefail
+          cur() { aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Parameters[?ParameterKey=='$1'].ParameterValue" --output text 2>/dev/null || true; }
+          NOW_PHASE=$(cur Phase); NOW_SNAP=$(cur SourceSnapshot)
+          if [ "$NOW_PHASE" = live ] && [ -n "$SNAP" ] && [ "$SNAP" != "$NOW_SNAP" ]; then
+            echo "::error::The database is live. Changing SourceSnapshot would replace it, so this is refused."; exit 1
+          fi
+          if [ "$NOW_PHASE" = live ] && [ "$PHASE" = test ]; then echo "::error::Live data cannot go back to test phase."; exit 1; fi
+          args=()
+          [ "$PHASE" != keep ] && args+=("Phase=$PHASE")
+          [ -n "$SNAP" ] && args+=("SourceSnapshot=$SNAP")
+          [ "$ADMIN" != keep ] && args+=("AdminEndpoint=$ADMIN")
+          [ -n "$EMAIL" ] && args+=("AlertEmail=$EMAIL")
+          aws cloudformation deploy --stack-name "$STACK" --template-file data/data.yaml \
+            --role-arn "arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/demeisen-v2-cfn-exec" \
+            ${args[@]+--parameter-overrides "${args[@]}"} --no-fail-on-empty-changeset
+          aws cloudformation update-termination-protection --stack-name "$STACK" --enable-termination-protection
+          if [ "$(cur Phase)" = live ]; then
+            aws cloudformation set-stack-policy --stack-name "$STACK" --stack-policy-body file://data/stack-policy.json
+            echo "Live: stack policy applied."
+          fi

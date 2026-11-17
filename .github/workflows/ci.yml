@@ -1,0 +1,24 @@
+# Every push and pull request: the platform's tests (with LibreOffice, as on AWS), the templates, the data
+# protections, and the container image builds.
+name: CI
+on: [push, pull_request]
+permissions: { contents: read }
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends libreoffice-writer-nogui
+      - run: pip install -r requirements-dev.txt
+      - name: Tests
+        run: python -m pytest -q tests
+      - name: Templates and data protections
+        run: |
+          cfn-lint data/data.yaml infra/app.yaml ops/bootstrap.yaml
+          python3 tools/check-guardrails.py data/data.yaml
+      - name: Scripts
+        run: shellcheck ops/*.sh
+      - name: Image builds
+        run: docker build -q -t platform-ci .

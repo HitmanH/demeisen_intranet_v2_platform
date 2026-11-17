@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block body %}<img class="onenda" src="/mnda/assets/onenda_badge.png" alt="oneNDA"><h1>New Mutual NDA (oneNDA v2.1)</h1>
+<form method="post" class="card"><div class="two">
+<label>Counterparty legal name<input name="counterparty" required></label>
+<label>Counterparty type<select name="cp_type" id="cp_type">
+<option value="investor">Potential investor</option><option value="data_vendor">Data vendor</option><option value="other">Other</option></select></label>
+<label class="full">Counterparty details (company no., registered address)<input name="cp_details"></label>
+<label class="full">Purpose <small>(leave blank to use the standard wording for the type)</small><textarea name="purpose" rows="2" id="purpose"></textarea></label>
+<label>Confidentiality period<select name="conf_period"><option>2 years</option><option>1 year</option><option>3 years</option><option>5 years</option><option>18 months</option></select></label>
+<input type="hidden" name="governing_law" value="England and Wales">
+<input type="hidden" name="dispute" value="Litigation in the courts of England and Wales">
+<p class="full small">Governing law: <b>England and Wales</b> · Dispute resolution: <b>the courts of England and Wales</b> (fixed)</p>
+<label>Effective date<input type="date" name="effective_date" value="{{ today }}"></label>
+<label>Our signatory<input name="our_signatory" value="{{ user.name }}"></label>
+<label>Our signatory title<input name="our_title" value="Member"></label>
+<label>Our signatory email<input type="email" name="our_email" value="{{ user.email }}"></label>
+<label>Counterparty email<input type="email" name="cp_email"></label>
+<label>Counterparty signatory<input name="cp_signatory"></label>
+<label>Counterparty signatory title<input name="cp_signatory_title"></label>
+<label class="full">Special provisions <small>(additions/modifications to oneNDA; leave as "None." to keep the standard terms)</small><textarea name="changes" rows="3">None.</textarea></label>
+</div><button>Generate NDA</button></form>
+<script>const P={{ purposes|tojson }};</script>{% endblock %}

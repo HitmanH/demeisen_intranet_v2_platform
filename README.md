@@ -1,34 +1,46 @@
-# LLP Intranet
+# Demeisen platform (v2)
 
-Flask + SQLite intranet with four tools:
+The Demeisen intranet: a portal hosting separate functions, plus the front door that serves the platform and the
+CRM at one address.
 
-1. **Mutual NDAs (oneNDA v2.1)** – form → filled oneNDA Word doc + wordmarked PDF, status workflow
-   (Draft → Internal review → Sent → Signed by counterparty → Fully executed), executed-copy upload, history.
-2. **Prospect-named documents** – upload any .docx; `{{PROSPECT}}`, `{{DATE}}`, `{{REF}}` placeholders are filled,
-   and every page gets "Prepared exclusively for <name>" header + reference footer.
-3. **Word → PDF with wordmark** – same flow converts to PDF (LibreOffice), adds wordmark, diagonal watermark
-   naming the recipient, optional open-password, and logs a SHA-256 in an issue register. `/verify` tells you
-   who a forwarded PDF was issued to.
-4. **Expenditure memos** – every active LLP member must approve; any rejection blocks it; printable sign-off record.
+| Folder | What it is | Owns these tables in `intranet` |
+|---|---|---|
+| `portal/` | sign-in, home, people, audit, files; shared tools (`core.py`, `doctools.py`) | `users`, `audit` |
+| `mnda/` | Mutual NDAs (oneNDA v2.1): Word + wordmarked PDF, status workflow, executed copies | `ndas` |
+| `memo/` | Expenditure memos: every member signs off, printable record | `memos`, `signoffs` |
+| `documents/` | Prospect-named documents, issue register, Verify | `issues` |
+| `data/` | **data stack** `demeisen-v2-platform-data`: private network, RDS instance, files bucket, write-once audit bucket, AWS Backup | |
+| `infra/` | **app stack** `demeisen-v2-platform-app`: the three functions and the CloudFront front door | |
+| `ops/` | one-time set-up, copying v1, database bootstrap, and `RUNBOOK.md` | |
 
-Everything is recorded in `/audit`.
+A function imports only from `portal` (never from another function) and plugs in through `register(registry)`:
+menu entries, home tiles and cards, lookups for Verify, and its own migrations. A test fails if a function's SQL
+touches another function's tables. To leave a function out, drop it from `PLATFORM_FUNCTIONS`.
 
-## Run
+The database is v1's `intranet`, unchanged: same tables, rows and IDs.
+
+## Run locally
+
 ```
-python3 -m venv .venv && .venv/bin/pip install flask python-docx pypdf reportlab
-.venv/bin/python app.py          # http://localhost:5000
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m portal.app          # http://localhost:5000, data in ./local-data (SQLite)
+.venv/bin/python -m pytest -q tests
 ```
-Requires LibreOffice (`soffice`) for Word→PDF.
 
-## Setup
-- Edit `config.py`: firm name/address, wordmark text, **LLP members**, home-page links.
-  Members are created on first start with password `changeme` — each should change it (top-right link).
-- **oneNDA:** the official oneNDA v2.1 Word template (CC BY 4.0) is in `data/assets/onenda_v2.1.docx`.
-  The app fills only the Parties and Variables tables; the Terms and the attribution footer are left as published.
-  Variations go in "Special provisions".
-- Optional logo: `data/assets/wordmark.png` replaces the text wordmark in the PDF header.
+Members from `portal/config.py` are created with password `changeme`. LibreOffice (`soffice`) is needed for PDFs.
 
-## Before going live
-Dev server only. For hosting: set `INTRANET_SECRET`, run under gunicorn behind HTTPS, back up `data/`,
-and consider SSO (Microsoft 365) instead of local passwords. For counterparty e-signature, link
-DocuSign/Adobe Sign — the current NDA flow tracks status and stores the executed copy.
+## On AWS
+
+- One image, three functions: `demeisen-v2-platform` (the app, in the private network, no internet),
+  `demeisen-v2-platform-signin` (`/auth/*`, outside it so it can reach Cognito) and `demeisen-v2-platform-admin`
+  (migrations and admin tasks, invoked only with AWS credentials).
+- The app signs in to MySQL as `platform_app` with an IAM token: no stored database password. It can add to the audit
+  trail but never change it; each audited action is also written once to the audit bucket (S3 Object Lock, 7 years).
+- Only requests through the front door are served (a secret header added by CloudFront).
+- Sign-in: the shared Demeisen pool (`demeisen_intranet_v2_auth`); a person is admitted only if active in `users`.
+
+## Deploying
+
+- **App:** every merge to `main` (workflow **Deploy**): image, app stack, migrations, front door address in SSM.
+- **Data:** only by hand, workflow **Deploy data**, after approval in the GitHub `data` environment.
+- First set-up, the test copy and cut-over: `ops/RUNBOOK.md`.

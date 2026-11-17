@@ -1,0 +1,5 @@
+{% extends "base.html" %}{% block body %}<img class="onenda" src="/mnda/assets/onenda_badge.png" alt="oneNDA"><h1>Mutual NDAs <a class="btn" href="/nda/new">+ New NDA</a></h1>
+<table><tr><th>Ref</th><th>Counterparty</th><th>Type</th><th>Status</th><th>Created</th><th>By</th></tr>
+{% for n in rows %}<tr><td><a href="/nda/{{n.id}}">{{ n.ref }}</a></td><td>{{ n.counterparty }}</td><td>{{ n.cp_type.replace('_',' ') }}</td>
+<td><span class="pill">{{ n.status }}</span></td><td>{{ n.created|fromiso }}</td><td>{{ n.author }}</td></tr>
+{% else %}<tr><td colspan="6">No NDAs yet.</td></tr>{% endfor %}</table>{% endblock %}

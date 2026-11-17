@@ -1,0 +1,2 @@
+<div class="card alert"><h2>Awaiting your sign-off ({{ pending|length }})</h2><ul>
+{% for m in pending %}<li><a href="/memos/{{m.id}}">{{ m.ref }} — {{ m.title }}</a> ({{ m.currency }} {{ '{:,.2f}'.format(m.amount) }})</li>{% endfor %}</ul></div>

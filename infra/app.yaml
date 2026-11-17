@@ -1,0 +1,298 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Demeisen platform v2 app and front door. Holds no data: the database, files and audit trail are in the data stack
+  (data/data.yaml), found through SSM parameters, so this stack can be redeployed, replaced or deleted without touching
+  them. One container image runs three functions: the main app (portal, MNDA, memos, documents; private network),
+  the sign-in function (/auth/*, outside the private network so it can reach Cognito) and the admin function
+  (migrations; no public address). The CloudFront front door is the single address for everything, including the CRM
+  at /crm/ when CrmSiteDomain and CrmApiDomain are set.
+
+Parameters:
+  ImageUri: { Type: String, Description: 'ECR image, by digest (the Deploy workflow sets it)' }
+  CrmSiteDomain: { Type: String, Default: none, Description: "CRM page bucket's regional domain (SSM /demeisen/v2/crm/site/bucket-domain), or none" }
+  CrmApiDomain: { Type: String, Default: none, Description: "CRM API domain (SSM /demeisen/v2/crm/api/domain), or none" }
+  UserPoolId: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/auth/user-pool-id }
+  AuthDomain: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/auth/domain }
+  DbHost: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/platform/db/host }
+  DbResourceId: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/platform/db/resource-id }
+  DbMasterSecretArn: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/platform/db/master-secret-arn }
+  SubnetIds: { Type: 'AWS::SSM::Parameter::Value<List<AWS::EC2::Subnet::Id>>', Default: /demeisen/v2/platform/net/subnets }
+  ClientSecurityGroup: { Type: 'AWS::SSM::Parameter::Value<AWS::EC2::SecurityGroup::Id>', Default: /demeisen/v2/platform/net/client-sg }
+  FilesBucket: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/platform/files-bucket }
+  AuditBucket: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/platform/audit-bucket }
+  AlertTopic: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/platform/alert-topic }
+
+Conditions:
+  HasCrm: !And [!Not [!Equals [!Ref CrmSiteDomain, none]], !Not [!Equals [!Ref CrmApiDomain, none]]]
+
+Resources:
+  # ---------- Main app: portal and functions. Signs in to MySQL as platform_app with an IAM token. ----------
+  MainRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: 'sts:AssumeRole' }]
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole']
+      Policies:
+        - PolicyName: data
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - { Effect: Allow, Action: 'rds-db:connect', Resource: !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:${DbResourceId}/platform_app' }
+              - { Effect: Allow, Action: ['s3:GetObject', 's3:PutObject'], Resource: !Sub 'arn:aws:s3:::${FilesBucket}/*' }
+              - { Effect: Allow, Action: 's3:ListBucket', Resource: !Sub 'arn:aws:s3:::${FilesBucket}' }
+              # Audit: add only. No delete, no overwrite of a locked object.
+              - { Effect: Allow, Action: 's3:PutObject', Resource: !Sub 'arn:aws:s3:::${AuditBucket}/audit/*' }
+  MainFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: demeisen-v2-platform
+      PackageType: Image
+      Code: { ImageUri: !Ref ImageUri }
+      Architectures: [x86_64]
+      MemorySize: 2048
+      Timeout: 120
+      EphemeralStorage: { Size: 1024 }
+      Role: !GetAtt MainRole.Arn
+      VpcConfig: { SecurityGroupIds: [!Ref ClientSecurityGroup], SubnetIds: !Ref SubnetIds }
+      Environment:
+        Variables:
+          DB_HOST: !Ref DbHost
+          DB_USER: platform_app
+          DB_NAME: intranet
+          FILES_BUCKET: !Ref FilesBucket
+          AUDIT_BUCKET: !Ref AuditBucket
+          OIDC: '1'
+          CRM_URL: /crm/
+          INTRANET_SECRET: '{{resolve:secretsmanager:demeisen-v2/platform/flask-secret}}'
+          ORIGIN_VERIFY: '{{resolve:secretsmanager:demeisen-v2/platform/origin-verify}}'
+  MainLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/demeisen-v2-platform, RetentionInDays: 90 }
+  MainUrl:
+    Type: AWS::Lambda::Url
+    Properties: { TargetFunctionArn: !Ref MainFunction, AuthType: NONE }
+  MainUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties: { FunctionName: !Ref MainFunction, Action: lambda:InvokeFunctionUrl, Principal: '*', FunctionUrlAuthType: NONE }
+  MainInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties: { FunctionName: !Ref MainFunction, Action: lambda:InvokeFunction, Principal: '*', InvokedViaFunctionUrl: true }
+
+  # ---------- Sign-in function: /auth/* only, no database ----------
+  AuthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: 'sts:AssumeRole' }]
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole']
+      Policies:
+        - PolicyName: oidc-client
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - { Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:demeisen-v2/platform/oidc-client-*' }
+  AuthFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: demeisen-v2-platform-signin
+      PackageType: Image
+      Code: { ImageUri: !Ref ImageUri }
+      Architectures: [x86_64]
+      MemorySize: 512
+      Timeout: 30
+      Role: !GetAtt AuthRole.Arn
+      Environment:
+        Variables:
+          AUTH_ONLY: '1'
+          OIDC_SECRET_NAME: demeisen-v2/platform/oidc-client
+          INTRANET_SECRET: '{{resolve:secretsmanager:demeisen-v2/platform/flask-secret}}'
+          ORIGIN_VERIFY: '{{resolve:secretsmanager:demeisen-v2/platform/origin-verify}}'
+  AuthLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/demeisen-v2-platform-signin, RetentionInDays: 90 }
+  AuthUrl:
+    Type: AWS::Lambda::Url
+    Properties: { TargetFunctionArn: !Ref AuthFunction, AuthType: NONE }
+  AuthUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties: { FunctionName: !Ref AuthFunction, Action: lambda:InvokeFunctionUrl, Principal: '*', FunctionUrlAuthType: NONE }
+  AuthInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties: { FunctionName: !Ref AuthFunction, Action: lambda:InvokeFunction, Principal: '*', InvokedViaFunctionUrl: true }
+
+  # ---------- Admin function: migrations and admin tasks; invoked only with AWS credentials ----------
+  AdminRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement: [{ Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: 'sts:AssumeRole' }]
+      ManagedPolicyArns: ['arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole']
+      Policies:
+        - PolicyName: admin
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: 'rds-db:connect'
+                Resource:
+                  - !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:${DbResourceId}/platform_migrator'
+                  - !Sub 'arn:aws:rds-db:${AWS::Region}:${AWS::AccountId}:dbuser:${DbResourceId}/platform_app'
+              - { Effect: Allow, Action: 'secretsmanager:GetSecretValue', Resource: !Ref DbMasterSecretArn }
+              - { Effect: Allow, Action: 's3:PutObject', Resource: !Sub 'arn:aws:s3:::${AuditBucket}/audit/*' }
+  AdminFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: demeisen-v2-platform-admin
+      PackageType: Image
+      Code: { ImageUri: !Ref ImageUri }
+      Architectures: [x86_64]
+      MemorySize: 1024
+      Timeout: 300
+      Role: !GetAtt AdminRole.Arn
+      VpcConfig: { SecurityGroupIds: [!Ref ClientSecurityGroup], SubnetIds: !Ref SubnetIds }
+      Environment:
+        Variables:
+          DB_HOST: !Ref DbHost
+          DB_USER: platform_app
+          DB_NAME: intranet
+          MASTER_SECRET_ARN: !Ref DbMasterSecretArn
+          AUDIT_BUCKET: !Ref AuditBucket
+          INTRANET_SECRET: '{{resolve:secretsmanager:demeisen-v2/platform/flask-secret}}'
+  AdminLogs:
+    Type: AWS::Logs::LogGroup
+    Properties: { LogGroupName: /aws/lambda/demeisen-v2-platform-admin, RetentionInDays: 365 }
+
+  # ---------- Sign-in client (server-side, confidential) and its settings for the sign-in function ----------
+  Client:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: demeisen-v2-platform
+      UserPoolId: !Ref UserPoolId
+      GenerateSecret: true
+      SupportedIdentityProviders: [COGNITO]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email]
+      CallbackURLs: [!Sub 'https://${Distribution.DomainName}/auth/callback']
+      LogoutURLs: [!Sub 'https://${Distribution.DomainName}/auth/signed-out']
+      ExplicitAuthFlows: [ALLOW_REFRESH_TOKEN_AUTH]
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      IdTokenValidity: 8
+      AccessTokenValidity: 8
+      TokenValidityUnits: { IdToken: hours, AccessToken: hours }
+  OidcSettings:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: demeisen-v2/platform/oidc-client
+      Description: Sign-in client for the platform, read by the sign-in function
+      SecretString: !Sub
+        - '{"issuer":"https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPoolId}","client_id":"${Client}","client_secret":"${Secret}","public_url":"https://${Distribution.DomainName}","logout_url":"https://${AuthDomain}/logout"}'
+        - { Secret: !GetAtt Client.ClientSecret }
+
+  # ---------- Front door: the one address for the platform and the CRM ----------
+  CrmOriginAccess:
+    Type: AWS::CloudFront::OriginAccessControl
+    Condition: HasCrm
+    Properties:
+      OriginAccessControlConfig: { Name: demeisen-v2-front-door-crm, OriginAccessControlOriginType: s3, SigningBehavior: always, SigningProtocol: sigv4 }
+  CrmIndex:
+    Type: AWS::CloudFront::Function
+    Properties:
+      Name: demeisen-v2-crm-index
+      AutoPublish: true
+      FunctionConfig: { Comment: '/crm -> /crm/, and folders -> index.html', Runtime: cloudfront-js-2.0 }
+      FunctionCode: |
+        function handler(event) {
+          var r = event.request;
+          if (r.uri === '/crm') return { statusCode: 301, statusDescription: 'Moved Permanently', headers: { location: { value: '/crm/' } } };
+          if (r.uri.endsWith('/')) r.uri += 'index.html';
+          return r;
+        }
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: demeisen-v2 front door
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: main
+            DomainName: !Select [2, !Split ['/', !GetAtt MainUrl.FunctionUrl]]
+            CustomOriginConfig: { OriginProtocolPolicy: https-only, OriginSSLProtocols: [TLSv1.2], OriginReadTimeout: 60 }
+            OriginCustomHeaders: [{ HeaderName: X-Origin-Verify, HeaderValue: '{{resolve:secretsmanager:demeisen-v2/platform/origin-verify}}' }]
+          - Id: signin
+            DomainName: !Select [2, !Split ['/', !GetAtt AuthUrl.FunctionUrl]]
+            CustomOriginConfig: { OriginProtocolPolicy: https-only, OriginSSLProtocols: [TLSv1.2] }
+            OriginCustomHeaders: [{ HeaderName: X-Origin-Verify, HeaderValue: '{{resolve:secretsmanager:demeisen-v2/platform/origin-verify}}' }]
+          - !If
+            - HasCrm
+            - { Id: crm-site, DomainName: !Ref CrmSiteDomain, OriginAccessControlId: !Ref CrmOriginAccess, S3OriginConfig: { OriginAccessIdentity: '' } }
+            - !Ref AWS::NoValue
+          - !If
+            - HasCrm
+            - { Id: crm-api, DomainName: !Ref CrmApiDomain, CustomOriginConfig: { OriginProtocolPolicy: https-only, OriginSSLProtocols: [TLSv1.2] } }
+            - !Ref AWS::NoValue
+        DefaultCacheBehavior:
+          TargetOriginId: main
+          ViewerProtocolPolicy: redirect-to-https
+          Compress: true
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad # CachingDisabled
+          OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac # AllViewerExceptHostHeader
+          ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03 # SecurityHeadersPolicy
+        CacheBehaviors:
+          - PathPattern: /auth/*
+            TargetOriginId: signin
+            ViewerProtocolPolicy: redirect-to-https
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
+          - !If
+            - HasCrm
+            - PathPattern: /crm/api/*
+              TargetOriginId: crm-api
+              ViewerProtocolPolicy: https-only
+              AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+              OriginRequestPolicyId: b689b0a8-53d0-40ab-baf2-68738e2966ac
+            - !Ref AWS::NoValue
+          - !If
+            - HasCrm
+            - PathPattern: /crm*
+              TargetOriginId: crm-site
+              ViewerProtocolPolicy: redirect-to-https
+              AllowedMethods: [GET, HEAD]
+              CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+              ResponseHeadersPolicyId: 67f7725c-6f97-4210-82d7-5512b31e9d03
+              FunctionAssociations: [{ EventType: viewer-request, FunctionARN: !GetAtt CrmIndex.FunctionARN }]
+            - !Ref AWS::NoValue
+
+  # ---------- Alerts ----------
+  MainErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: demeisen-v2-platform-errors
+      AlarmDescription: The platform function failed
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{ Name: FunctionName, Value: !Ref MainFunction }]
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref AlertTopic]
+
+Outputs:
+  Url: { Value: !Sub 'https://${Distribution.DomainName}/' }
+  Origin: { Value: !Sub 'https://${Distribution.DomainName}' }
+  DistributionArn: { Value: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}' }
+  AdminFunction: { Value: !Ref AdminFunction }

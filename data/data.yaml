@@ -1,0 +1,293 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Demeisen platform v2 data (portal, MNDA, memos, documents): its own network (private subnets, no internet access),
+  its own RDS MySQL instance (database `intranet`), the files bucket (NDAs, PDFs, uploads), the write-once audit bucket
+  and an AWS Backup plan. Completely separate from the CRM's data. Deploying or deleting the platform's app stack never
+  touches this stack. Apps find these resources through SSM parameters under /demeisen/v2/platform/, never exports.
+  Phase "test": a copy of v1 data for trying v2; deletion protection off so the copy can be refreshed.
+  Phase "live": deletion protection on; the Deploy data workflow also applies data/stack-policy.json, which blocks any
+  update that would replace or delete the database or the buckets.
+
+Parameters:
+  Phase: { Type: String, AllowedValues: [test, live], Default: test }
+  SourceSnapshot:
+    Type: String
+    Default: ''
+    Description: >
+      Encrypted DB snapshot to start from (ops/copy-from-v1.sh makes one). Blank: an empty database.
+      Set only when the database is first created, and in test phase to refresh the copy. Never change it in live phase.
+  InstanceClass: { Type: String, Default: db.t4g.micro }
+  EngineVersion: { Type: String, Default: '8.4.11', Description: 'Must be the same or newer than the snapshot''s' }
+  StorageGiB: { Type: Number, Default: 20, MinValue: 20 }
+  DbBackupDays: { Type: Number, Default: 35, MinValue: 7, MaxValue: 35, Description: 'RDS point-in-time recovery window' }
+  AuditRetentionDays: { Type: Number, Default: 2555, Description: 'How long audit records are kept, unchangeable (2555 days = 7 years)' }
+  AuditLockMode:
+    Type: String
+    AllowedValues: [GOVERNANCE, COMPLIANCE]
+    Default: GOVERNANCE
+    Description: >
+      GOVERNANCE: only a specially permitted administrator can shorten retention. COMPLIANCE: nobody, not even the
+      account's root user, can change or delete a record before its date. Switching to COMPLIANCE cannot be undone.
+  VaultRetentionDays: { Type: Number, Default: 365, Description: 'How long AWS Backup keeps daily snapshots' }
+  AdminEndpoint:
+    Type: String
+    AllowedValues: ['off', 'on']
+    Default: 'off'
+    Description: >
+      'on' adds a Secrets Manager endpoint to the private network, so the migration function can read the master
+      password (needed only for the one-time bootstrap). About $0.01 an hour while on; turn it off afterwards.
+  VpcCidr: { Type: String, Default: 10.42.0.0/16 }
+  AlertEmail: { Type: String, Default: '', Description: 'Address for backup alerts (blank: none)' }
+
+Mappings:
+  S3PrefixList:
+    eu-west-2: { Id: pl-7ca54015 }
+
+Conditions:
+  IsLive: !Equals [!Ref Phase, live]
+  FromSnapshot: !Not [!Equals [!Ref SourceSnapshot, '']]
+  WithAdminEndpoint: !Equals [!Ref AdminEndpoint, 'on']
+  WithAlerts: !Not [!Equals [!Ref AlertEmail, '']]
+
+Resources:
+  # ---------- Network: private only. Nothing here can reach, or be reached from, the internet. ----------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: demeisen-v2-platform }]
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 4, 8]]
+      Tags: [{ Key: Name, Value: demeisen-v2-platform-a }]
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Select [1, !GetAZs '']
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 4, 8]]
+      Tags: [{ Key: Name, Value: demeisen-v2-platform-b }]
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: { VpcId: !Ref Vpc, Tags: [{ Key: Name, Value: demeisen-v2-platform }] }
+  SubnetARoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref SubnetA, RouteTableId: !Ref RouteTable }
+  SubnetBRoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: { SubnetId: !Ref SubnetB, RouteTableId: !Ref RouteTable }
+  S3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.s3'
+      VpcEndpointType: Gateway
+      RouteTableIds: [!Ref RouteTable]
+  # Security group for the app's functions: they may talk to the database and S3, nothing else.
+  ClientSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Platform functions that may use the platform database
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, DestinationPrefixListId: !FindInMap [S3PrefixList, !Ref 'AWS::Region', Id], Description: S3 }
+  ClientToDb:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties: { GroupId: !Ref ClientSecurityGroup, IpProtocol: tcp, FromPort: 3306, ToPort: 3306, DestinationSecurityGroupId: !Ref DbSecurityGroup, Description: MySQL }
+  ClientToEndpoints:
+    Type: AWS::EC2::SecurityGroupEgress
+    Condition: WithAdminEndpoint
+    Properties: { GroupId: !Ref ClientSecurityGroup, IpProtocol: tcp, FromPort: 443, ToPort: 443, DestinationSecurityGroupId: !Ref EndpointSecurityGroup, Description: Secrets Manager }
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Platform database, reachable only from the platform functions
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 3306, ToPort: 3306, SourceSecurityGroupId: !Ref ClientSecurityGroup, Description: platform functions }
+      SecurityGroupEgress:
+        - { IpProtocol: '-1', CidrIp: 127.0.0.1/32, Description: none }
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: WithAdminEndpoint
+    Properties:
+      GroupDescription: Secrets Manager endpoint, for the one-time bootstrap
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, SourceSecurityGroupId: !Ref ClientSecurityGroup }
+  SecretsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: WithAdminEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      ServiceName: !Sub 'com.amazonaws.${AWS::Region}.secretsmanager'
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref SubnetA]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  # ---------- Database ----------
+  DbSubnets:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Demeisen platform v2 database
+      SubnetIds: [!Ref SubnetA, !Ref SubnetB]
+  DbParameters:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Demeisen platform v2 (TLS only; log_bin_trust_function_creators as on the CRM server)
+      Family: mysql8.4
+      Parameters:
+        log_bin_trust_function_creators: '1'
+        require_secure_transport: 'ON'
+  Db:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: mysql
+      EngineVersion: !Ref EngineVersion
+      DBInstanceClass: !Ref InstanceClass
+      DBSnapshotIdentifier: !If [FromSnapshot, !Ref SourceSnapshot, !Ref 'AWS::NoValue']
+      MasterUsername: !If [FromSnapshot, !Ref 'AWS::NoValue', admin]
+      ManageMasterUserPassword: true
+      AllocatedStorage: !Ref StorageGiB
+      MaxAllocatedStorage: 100
+      StorageType: gp3
+      StorageEncrypted: true
+      DBSubnetGroupName: !Ref DbSubnets
+      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      DBParameterGroupName: !Ref DbParameters
+      PubliclyAccessible: false
+      EnableIAMDatabaseAuthentication: true
+      DeletionProtection: !If [IsLive, true, false]
+      BackupRetentionPeriod: !Ref DbBackupDays
+      PreferredBackupWindow: '01:00-01:30'
+      PreferredMaintenanceWindow: 'sun:03:00-sun:03:30'
+      CopyTagsToSnapshot: true
+      AutoMinorVersionUpgrade: true
+      EnableCloudwatchLogsExports: [error]
+      Tags: [{ Key: demeisen:data, Value: platform }, { Key: demeisen:phase, Value: !Ref Phase }]
+
+  # ---------- Files: generated NDAs and PDFs, uploads. Versioned, so an overwrite or delete can be undone. ----------
+  FilesBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'demeisen-v2-platform-files-${AWS::AccountId}'
+      VersioningConfiguration: { Status: Enabled }
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }]
+      LifecycleConfiguration:
+        Rules:
+          - { Id: keep-old-versions-a-year, Status: Enabled, NoncurrentVersionExpiration: { NoncurrentDays: 365 } }
+      Tags: [{ Key: demeisen:data, Value: platform }]
+  # ---------- Audit: every audited action is also written here once, and cannot be changed or deleted ----------
+  AuditBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub 'demeisen-v2-platform-audit-${AWS::AccountId}'
+      ObjectLockEnabled: true
+      VersioningConfiguration: { Status: Enabled }
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule: { DefaultRetention: { Mode: !Ref AuditLockMode, Days: !Ref AuditRetentionDays } }
+      PublicAccessBlockConfiguration: { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }]
+      Tags: [{ Key: demeisen:data, Value: platform-audit }]
+  DataBucketPolicies:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FilesBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Sid: RequireTls, Effect: Deny, Principal: '*', Action: 's3:*', Resource: [!GetAtt FilesBucket.Arn, !Sub '${FilesBucket.Arn}/*'], Condition: { Bool: { 'aws:SecureTransport': 'false' } } }
+  AuditBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuditBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Sid: RequireTls, Effect: Deny, Principal: '*', Action: 's3:*', Resource: [!GetAtt AuditBucket.Arn, !Sub '${AuditBucket.Arn}/*'], Condition: { Bool: { 'aws:SecureTransport': 'false' } } }
+
+  # ---------- AWS Backup: daily snapshots kept for a year, separate from RDS's own 35-day recovery window ----------
+  Vault:
+    Type: AWS::Backup::BackupVault
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: { BackupVaultName: demeisen-v2-platform }
+  Plan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: demeisen-v2-platform
+        BackupPlanRule:
+          - RuleName: daily
+            TargetBackupVault: !Ref Vault
+            ScheduleExpression: cron(30 2 * * ? *)
+            ScheduleExpressionTimezone: Europe/London
+            StartWindowMinutes: 60
+            Lifecycle: { DeleteAfterDays: !Ref VaultRetentionDays }
+  PlanSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref Plan
+      BackupSelection:
+        SelectionName: platform-database
+        IamRoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/demeisen-v2-backup'
+        Resources: [!Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:db:${Db}']
+
+  # ---------- Alerts ----------
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties: { TopicName: demeisen-v2-platform-data-alerts }
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: WithAlerts
+    Properties: { TopicArn: !Ref AlertTopic, Protocol: email, Endpoint: !Ref AlertEmail }
+  BackupFailedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: A platform AWS Backup job failed
+      EventPattern:
+        source: [aws.backup]
+        detail-type: [Backup Job State Change]
+        detail: { state: [FAILED, ABORTED, EXPIRED], backupVaultName: [!Ref Vault] }
+      Targets: [{ Arn: !Ref AlertTopic, Id: alert }]
+  AlertTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref AlertTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - { Effect: Allow, Principal: { Service: events.amazonaws.com }, Action: 'sns:Publish', Resource: !Ref AlertTopic }
+
+  # ---------- Where the app finds things ----------
+  P1: { Type: AWS::SSM::Parameter, Properties: { Name: /demeisen/v2/platform/db/host, Type: String, Value: !GetAtt Db.Endpoint.Address } }
+  P2: { Type: AWS::SSM::Parameter, Properties: { Name: /demeisen/v2/platform/db/resource-id, Type: String, Value: !GetAtt Db.DbiResourceId } }
+  P3: { Type: AWS::SSM::Parameter, Properties: { Name: /demeisen/v2/platform/db/master-secret-arn, Type: String, Value: !GetAtt Db.MasterUserSecret.SecretArn } }
+  P4: { Type: AWS::SSM::Parameter, Properties: { Name: /demeisen/v2/platform/net/subnets, Type: StringList, Value: !Join [',', [!Ref SubnetA, !Ref SubnetB]] } }
+  P5: { Type: AWS::SSM::Parameter, Properties: { Name: /demeisen/v2/platform/net/client-sg, Type: String, Value: !Ref ClientSecurityGroup } }
+  P6: { Type: AWS::SSM::Parameter, Properties: { Name: /demeisen/v2/platform/files-bucket, Type: String, Value: !Ref FilesBucket } }
+  P8: { Type: AWS::SSM::Parameter, Properties: { Name: /demeisen/v2/platform/audit-bucket, Type: String, Value: !Ref AuditBucket } }
+  P7: { Type: AWS::SSM::Parameter, Properties: { Name: /demeisen/v2/platform/alert-topic, Type: String, Value: !Ref AlertTopic } }
+
+Outputs:
+  DbHost: { Value: !GetAtt Db.Endpoint.Address }
+  DbInstance: { Value: !Ref Db }
+  FilesBucket: { Value: !Ref FilesBucket }
+  AuditBucket: { Value: !Ref AuditBucket }
+  Phase: { Value: !Ref Phase }

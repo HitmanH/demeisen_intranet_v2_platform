@@ -1,7 +1,11 @@
 __pycache__/
 .venv/
-data/intranet.db
-data/generated/*
-data/uploads/*
-!data/generated/.gitkeep
-!data/uploads/.gitkeep
+.pytest_cache/
+/local-data/
+*.db
+# Never commit confidential documents or exports
+*.xlsx
+*.csv
+.env
+.env.*
+*.pem

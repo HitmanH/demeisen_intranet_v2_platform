@@ -1,0 +1,8 @@
+{% extends "base.html" %}{% block body %}
+<h1>Welcome, {{ me.name.split()[0] }}</h1>
+{% for c in cards %}{{ c|safe }}{% endfor %}
+<div class="grid">
+{% for href, title, desc in tiles %}<a class="tile" href="{{ href }}"><b>{{ title }}</b><span>{{ desc|safe }}</span></a>{% endfor %}
+{% for l in cfg.LINKS %}<a class="tile ext" href="{{ l.url }}"{% if l.url.startswith('http') %} target="_blank" rel="noopener"{% endif %}><b>{{ l.title }}{% if l.url.startswith('http') %} ↗{% endif %}</b><span>{{ l.desc }}</span></a>{% endfor %}
+</div>
+{% endblock %}

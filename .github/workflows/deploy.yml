@@ -1,0 +1,67 @@
+# Deploys the platform app and the front door (never the data) on every merge to main: builds the image, updates the
+# app stack (with the CRM's routes once the CRM is deployed), applies migrations, records the front door's address.
+# The AWS role used here can change only the stack demeisen-v2-platform-app and what it owns.
+name: Deploy
+on:
+  push:
+    branches: [main]
+    paths: ['portal/**', 'mnda/**', 'memo/**', 'documents/**', 'infra/**', 'Dockerfile', 'requirements.txt', '.github/workflows/deploy.yml']
+  workflow_dispatch:
+permissions: { id-token: write, contents: read }
+concurrency: deploy
+env:
+  AWS_REGION: eu-west-2
+  STACK: demeisen-v2-platform-app
+  REPO: demeisen-v2-platform
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/demeisen-v2-github-platform-app
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push the image
+        id: image
+        run: |
+          set -euo pipefail
+          IMG="${{ steps.ecr.outputs.registry }}/$REPO:${GITHUB_SHA::12}"
+          docker build --platform linux/amd64 --provenance=false -t "$IMG" .
+          docker push "$IMG"
+          echo "uri=${{ steps.ecr.outputs.registry }}/$REPO@$(docker inspect --format='{{index .RepoDigests 0}}' "$IMG" | cut -d@ -f2)" >> "$GITHUB_OUTPUT"
+      - name: App stack and front door
+        run: |
+          set -euo pipefail
+          p() { aws ssm get-parameter --name "$1" --query Parameter.Value --output text 2>/dev/null || echo none; }
+          aws cloudformation deploy --stack-name "$STACK" --template-file infra/app.yaml --capabilities CAPABILITY_IAM \
+            --role-arn "arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/demeisen-v2-cfn-exec" --no-fail-on-empty-changeset \
+            --parameter-overrides ImageUri="${{ steps.image.outputs.uri }}" \
+              CrmSiteDomain="$(p /demeisen/v2/crm/site/bucket-domain)" CrmApiDomain="$(p /demeisen/v2/crm/api/domain)"
+      - name: Record the front door's address for the other apps
+        run: |
+          set -euo pipefail
+          out() { aws cloudformation describe-stacks --stack-name "$STACK" --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text; }
+          aws ssm put-parameter --name /demeisen/v2/edge/origin --type String --overwrite --value "$(out Origin)"
+          aws ssm put-parameter --name /demeisen/v2/edge/distribution-arn --type String --overwrite --value "$(out DistributionArn)"
+          echo "### Front door: $(out Url)" >> "$GITHUB_STEP_SUMMARY"
+      - name: Migrations
+        run: |
+          aws lambda invoke --function-name demeisen-v2-platform-admin --cli-binary-format raw-in-base64-out \
+            --payload '{"admin_task":"migrate"}' out.json >/dev/null
+          cat out.json; echo
+          if grep -q 'errorMessage' out.json; then
+            if grep -q "platform_migrator" out.json; then
+              echo "::warning::Database not bootstrapped yet: run ops/bootstrap-databases.sh (ops/RUNBOOK.md)."
+            else exit 1; fi
+          fi
+      - name: Check the live site
+        run: |
+          ORIGIN=$(aws ssm get-parameter --name /demeisen/v2/edge/origin --query Parameter.Value --output text)
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$ORIGIN/healthz"); [ "$code" = 200 ] && break; sleep 30
+          done
+          test "$code" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$ORIGIN/")" = 302

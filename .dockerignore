@@ -1,7 +1,10 @@
 .git
+.github
 .venv
 __pycache__
-data/intranet.db
-data/generated
-data/uploads
-deploy
+local-data
+tests
+ops
+infra
+tools
+*.md

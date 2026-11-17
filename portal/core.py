@@ -1,0 +1,86 @@
+"""What every platform function shares: the database connection, the signed-in person, the audit trail, file storage
+and a small registry through which functions add to the portal (menu, home-page cards, document lookups) without
+importing each other. A function (mnda, memo, documents) imports only from here."""
+import json, os, tempfile, uuid
+from datetime import datetime, date, timezone
+from functools import wraps
+from flask import g, session, request, redirect, url_for, render_template, current_app
+from . import dbconn, storage
+
+# ---------- working folders for generated files (S3 holds the real copies when FILES_BUCKET is set) ----------
+if storage.BUCKET or os.environ.get("AUTH_ONLY"):
+    _SCRATCH = tempfile.mkdtemp(prefix="platform-")
+    GEN, UPL = os.path.join(_SCRATCH, "generated"), os.path.join(_SCRATCH, "uploads")
+else:
+    _DATA = os.environ.get("PLATFORM_DATA", "local-data")
+    GEN, UPL = os.path.join(_DATA, "generated"), os.path.join(_DATA, "uploads")
+os.makedirs(GEN, exist_ok=True); os.makedirs(UPL, exist_ok=True)
+
+
+def db():
+    if "db" not in g:
+        g.db = dbconn.Conn()
+    return g.db
+
+
+def close_db(_=None):
+    c = g.pop("db", None)
+    if c is not None: c.close()
+
+
+def now(): return datetime.now().isoformat(timespec="seconds")
+def newref(prefix): return f"{prefix}-{date.today():%Y%m}-{uuid.uuid4().hex[:5].upper()}"
+
+
+def me():
+    uid = session.get("uid")
+    return db().execute("select * from users where id=?", (uid,)).fetchone() if uid else None
+
+
+def audit(entity, eid, action, detail=""):
+    """Records an action in audit and, when AUDIT_BUCKET is set, as a write-once object that nobody (not even
+    an administrator) can change or delete until its retention date: the tamper-proof copy of the trail."""
+    at = now()
+    db().execute("insert into audit(at,user_id,entity,entity_id,action,detail) values(?,?,?,?,?,?)",
+                 (at, session.get("uid"), entity, eid, action, detail))
+    db().commit()
+    if storage.AUDIT_BUCKET:
+        u = me()
+        rec = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "user_id": session.get("uid"),
+               "user_email": u["email"] if u else None, "entity": entity, "entity_id": eid, "action": action,
+               "detail": detail, "ip": request.remote_addr if request else None}
+        storage.put_audit(rec)
+
+
+def login_required(f):
+    @wraps(f)
+    def w(*a, **k):
+        oidc = current_app.extensions.get("demeisen_oidc")
+        if oidc is not None:
+            email = oidc.email()
+            if not email:
+                session.pop("uid", None); return redirect(oidc.login_url(request.path))
+            if not session.get("uid"):
+                u = db().execute("select id from users where email=? and active=1", (email,)).fetchone()
+                if not u: return render_template("no_access.html", email=email), 403
+                session["uid"] = u["id"]
+        elif not session.get("uid"):
+            return redirect(url_for("portal.login", next=request.path))
+        return f(*a, **k)
+    return w
+
+
+# ---------- registry: how functions plug into the portal ----------
+class Registry:
+    def __init__(self):
+        self.nav = []            # (href, label), in menu order
+        self.home_tiles = []     # (href, title, description)
+        self.home_cards = []     # fn(uid) -> rendered HTML or ""
+        self.ref_lookups = []    # fn(ref) -> row with ref, prospect, created, or None (used by Verify)
+        self.migrations = {}     # module -> [(id, {"sqlite": sql, "mysql": sql})]
+
+
+REGISTRY = Registry()
+
+
+def to_json(v): return json.dumps(v, default=str)
