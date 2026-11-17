@@ -6,6 +6,8 @@ Description: >
 
 Parameters:
   GitHubOwner: { Type: String, Default: HitmanH }
+  # GitHub may put immutable IDs in the token subject (repo:Owner@OwnerId/Repo@RepoId:...), as it did for v1.
+  GitHubOwnerId: { Type: String, Default: '5677860' }
   OidcProviderArn:
     Type: String
     Default: arn:aws:iam::642552605309:oidc-provider/token.actions.githubusercontent.com
@@ -50,7 +52,7 @@ Resources:
       RoleName: demeisen-v2-github-crm-app
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument: !Sub
-        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${OidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com","token.actions.githubusercontent.com:sub":"repo:${GitHubOwner}/${Repo}:ref:refs/heads/main"}}}]}'
+        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${OidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com"},"StringLike":{"token.actions.githubusercontent.com:sub":["repo:${GitHubOwner}/${Repo}:ref:refs/heads/main","repo:${GitHubOwner}@${GitHubOwnerId}/${Repo}@*:ref:refs/heads/main"]}}}]}'
         - { Repo: demeisen_intranet_v2_crm }
       Policies:
         - PolicyName: deploy-crm-app
@@ -69,7 +71,7 @@ Resources:
       RoleName: demeisen-v2-github-crm-data
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument: !Sub
-        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${OidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com","token.actions.githubusercontent.com:sub":"repo:${GitHubOwner}/${Repo}:environment:data"}}}]}'
+        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${OidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com"},"StringLike":{"token.actions.githubusercontent.com:sub":["repo:${GitHubOwner}/${Repo}:environment:data","repo:${GitHubOwner}@${GitHubOwnerId}/${Repo}@*:environment:data"]}}}]}'
         - { Repo: demeisen_intranet_v2_crm }
       Policies:
         - PolicyName: deploy-crm-data
@@ -85,7 +87,7 @@ Resources:
       RoleName: demeisen-v2-github-platform-app
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument: !Sub
-        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${OidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com","token.actions.githubusercontent.com:sub":"repo:${GitHubOwner}/${Repo}:ref:refs/heads/main"}}}]}'
+        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${OidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com"},"StringLike":{"token.actions.githubusercontent.com:sub":["repo:${GitHubOwner}/${Repo}:ref:refs/heads/main","repo:${GitHubOwner}@${GitHubOwnerId}/${Repo}@*:ref:refs/heads/main"]}}}]}'
         - { Repo: demeisen_intranet_v2_platform }
       Policies:
         - PolicyName: deploy-platform-app
@@ -108,7 +110,7 @@ Resources:
       RoleName: demeisen-v2-github-platform-data
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument: !Sub
-        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${OidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com","token.actions.githubusercontent.com:sub":"repo:${GitHubOwner}/${Repo}:environment:data"}}}]}'
+        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${OidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com"},"StringLike":{"token.actions.githubusercontent.com:sub":["repo:${GitHubOwner}/${Repo}:environment:data","repo:${GitHubOwner}@${GitHubOwnerId}/${Repo}@*:environment:data"]}}}]}'
         - { Repo: demeisen_intranet_v2_platform }
       Policies:
         - PolicyName: deploy-platform-data
@@ -124,7 +126,7 @@ Resources:
       RoleName: demeisen-v2-github-auth-data
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument: !Sub
-        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${OidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com","token.actions.githubusercontent.com:sub":"repo:${GitHubOwner}/${Repo}:environment:data"}}}]}'
+        - '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Federated":"${OidcProviderArn}"},"Action":"sts:AssumeRoleWithWebIdentity","Condition":{"StringEquals":{"token.actions.githubusercontent.com:aud":"sts.amazonaws.com"},"StringLike":{"token.actions.githubusercontent.com:sub":["repo:${GitHubOwner}/${Repo}:environment:data","repo:${GitHubOwner}@${GitHubOwnerId}/${Repo}@*:environment:data"]}}}]}'
         - { Repo: demeisen_intranet_v2_auth }
       Policies:
         - PolicyName: deploy-auth-pool
