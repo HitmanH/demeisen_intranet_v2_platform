@@ -14,7 +14,7 @@ param imageTag string = 'latest'
 param enableWeb bool = false
 // Sign-in (used only when enableWeb): the Demeisen Cognito pool, with an app client for the Azure address.
 param oidcIssuer string = 'https://cognito-idp.eu-west-2.amazonaws.com/eu-west-2_o84PDILyl'
-param oidcClientId string = ''
+param oidcClientId string = '6bh7dgqqavh7puhunqd5g8l410'   // the platform's Cognito client (same as AWS v2)
 param oidcLogoutUrl string = 'https://demeisen-crm-poc.auth.eu-west-2.amazoncognito.com/logout'
 @description('The address people use (the front door, or the app\'s own address before step 7), e.g. https://xyz.azurefd.net')
 param publicUrl string = ''

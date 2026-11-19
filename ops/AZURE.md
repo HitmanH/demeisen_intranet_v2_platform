@@ -11,9 +11,9 @@ holds no data except the two MySQL servers, the storage account and Key Vault. A
 | 3 | Database logins `*_app` / `*_migrator`, passwords only in Key Vault; CRM migration history | Cloud Shell block | done |
 | 4 | Stored files (S3 `migration/` package) copied to the `files` container | Cloud Shell block | done |
 | 5 | Code runs on both clouds (see below) | both repos | done |
-| 6 | Container apps and jobs | `crm/infra/azure/app.bicep`, `infra/azure/app.bicep` | |
-| 7 | Front door (one address: `/`, `/crm/`, `/auth/`) | to do | |
-| 7a | Cognito: allow the Azure address to sign in | to do (with sign-in) | |
+| 6 | Container apps and jobs | `crm/infra/azure/app.bicep`, `infra/azure/app.bicep` | done |
+| 7 | Front door (one address: `/`, `/crm/`, `/auth/`), `X-Origin-Verify` on both apps | `infra/azure/frontdoor.bicep` | |
+| 7a | Cognito: the v2 sign-in clients also accept the Azure address (SSM `/demeisen/v2/azure/url`, read by both AWS app stacks) | AWS app templates | |
 | 8–10 | Parallel test, cut-over (re-copy data), retire AWS | | |
 | 11 | Microsoft (Entra) sign-in instead of Cognito | later | |
 
@@ -31,7 +31,4 @@ holds no data except the two MySQL servers, the storage account and Key Vault. A
 ## Still to do
 - Audit copy: the `audit` container is not yet write-once (AWS uses S3 Object Lock). Add version-level immutability
   before cut-over.
-- Platform web app: needs a Cognito app client for the Azure address and Key Vault secrets
-  `platform-oidc-client-secret`, `platform-flask-secret`, then `app.bicep enableWeb=true` (with step 7a).
-- Front door with the `X-Origin-Verify` header, then `ORIGIN_VERIFY` on both apps.
 - Database servers: turn off public network access once everything uses the private links.

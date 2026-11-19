@@ -21,8 +21,12 @@ Parameters:
   FilesBucket: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/platform/files-bucket }
   AuditBucket: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/platform/audit-bucket }
   AlertTopic: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/platform/alert-topic }
+  # The Azure front door's address (e.g. https://x.azurefd.net), or none: lets the same sign-in client return there too
+  # while v2 runs on both clouds. Set with: aws ssm put-parameter --name /demeisen/v2/azure/url --value ... --overwrite
+  AzureUrl: { Type: 'AWS::SSM::Parameter::Value<String>', Default: /demeisen/v2/azure/url }
 
 Conditions:
+  HasAzure: !Not [!Equals [!Ref AzureUrl, none]]
   HasCrm: !And [!Not [!Equals [!Ref CrmSiteDomain, none]], !Not [!Equals [!Ref CrmApiDomain, none]]]
 
 Resources:
@@ -177,8 +181,14 @@ Resources:
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [openid, email]
-      CallbackURLs: [!Sub 'https://${Distribution.DomainName}/auth/callback']
-      LogoutURLs: [!Sub 'https://${Distribution.DomainName}/auth/signed-out']
+      CallbackURLs: !If
+        - HasAzure
+        - [!Sub 'https://${Distribution.DomainName}/auth/callback', !Sub '${AzureUrl}/auth/callback']
+        - [!Sub 'https://${Distribution.DomainName}/auth/callback']
+      LogoutURLs: !If
+        - HasAzure
+        - [!Sub 'https://${Distribution.DomainName}/auth/signed-out', !Sub '${AzureUrl}/auth/signed-out']
+        - [!Sub 'https://${Distribution.DomainName}/auth/signed-out']
       ExplicitAuthFlows: [ALLOW_REFRESH_TOKEN_AUTH]
       PreventUserExistenceErrors: ENABLED
       EnableTokenRevocation: true
