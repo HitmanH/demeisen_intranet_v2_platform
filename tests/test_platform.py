@@ -11,7 +11,8 @@ HAS_SOFFICE = shutil.which("soffice") is not None
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("PLATFORM_DATA", str(tmp_path))
-    for k in ("DB_HOST", "OIDC", "OIDC_ISSUER", "OIDC_SECRET_NAME", "FILES_BUCKET", "AUDIT_BUCKET", "AUTH_ONLY", "ORIGIN_VERIFY"):
+    for k in ("DB_HOST", "OIDC", "OIDC_ISSUER", "OIDC_SECRET_NAME", "FILES_BUCKET", "AUDIT_BUCKET", "AUTH_ONLY", "ORIGIN_VERIFY",
+              "PLATFORM_CLOUD", "AZURE_STORAGE_ACCOUNT", "INTRANET_SECRET", "DB_PASSWORD", "DB_MIGRATOR_PASSWORD"):
         monkeypatch.delenv(k, raising=False)
     for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents")]:
         del sys.modules[m]
@@ -128,3 +129,49 @@ def test_origin_verify_blocks_direct_calls(tmp_path, monkeypatch):
 def test_admin_task_rejects_unconfirmed_drops():
     from portal import lambda_handler
     assert "error" in lambda_handler.bootstrap({"dropDatabases": ["crm"]})
+
+
+def _fresh_app_module(monkeypatch, tmp_path, **env):
+    monkeypatch.setenv("PLATFORM_DATA", str(tmp_path))
+    for k in ("DB_HOST", "OIDC", "OIDC_ISSUER", "OIDC_SECRET_NAME", "FILES_BUCKET", "AUDIT_BUCKET", "AUTH_ONLY",
+              "ORIGIN_VERIFY", "PLATFORM_CLOUD", "AZURE_STORAGE_ACCOUNT", "INTRANET_SECRET"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items(): monkeypatch.setenv(k, v)
+    for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents")]:
+        del sys.modules[m]
+    from portal import app
+    return app
+
+
+def test_azure_refuses_built_in_passwords(tmp_path, monkeypatch):
+    app = _fresh_app_module(monkeypatch, tmp_path, PLATFORM_CLOUD="azure", INTRANET_SECRET="s" * 40)
+    with pytest.raises(RuntimeError, match="shared sign-in"):
+        app.create_app()
+
+
+def test_azure_refuses_default_session_secret(tmp_path, monkeypatch):
+    app = _fresh_app_module(monkeypatch, tmp_path, PLATFORM_CLOUD="azure", OIDC_ISSUER="https://issuer.example",
+                            OIDC_CLIENT_ID="c", OIDC_CLIENT_SECRET="s", PUBLIC_URL="https://app.example")
+    with pytest.raises(RuntimeError, match="INTRANET_SECRET"):
+        app.create_app()
+
+
+def test_azure_storage_switches_files_and_audit_to_the_cloud(tmp_path, monkeypatch):
+    _fresh_app_module(monkeypatch, tmp_path, AZURE_STORAGE_ACCOUNT="acct")
+    from portal import storage, core
+    assert storage.REMOTE and storage.AUDIT_REMOTE
+    assert not core.GEN.startswith(str(tmp_path))   # scratch folders, not the local data folder
+
+
+def test_db_password_comes_from_env_per_login(monkeypatch):
+    for m in [m for m in sys.modules if m.split(".")[0] == "portal"]: del sys.modules[m]
+    from portal import dbconn
+    seen = {}
+    class FakePymysql:
+        class cursors: DictCursor = object
+        @staticmethod
+        def connect(**kw): seen.update(kw); return object()
+    monkeypatch.setitem(sys.modules, "pymysql", FakePymysql)
+    monkeypatch.setenv("DB_HOST", "h"); monkeypatch.setenv("DB_PASSWORD", "app-pw"); monkeypatch.setenv("DB_MIGRATOR_PASSWORD", "mig-pw")
+    dbconn.mysql_connect(); assert seen["password"] == "app-pw" and seen["user"] == "platform_app"
+    dbconn.mysql_connect(user="platform_migrator"); assert seen["password"] == "mig-pw"

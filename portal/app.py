@@ -81,7 +81,7 @@ def home():
 @login_required
 def files(kind, name):
     if kind not in ("generated", "uploads"): abort(404)
-    if storage.BUCKET: return redirect(storage.download_url(kind, secure_filename(name)))
+    if storage.REMOTE: return storage.download_response(kind, secure_filename(name))
     return send_from_directory(os.path.abspath(core.GEN if kind == "generated" else core.UPL), name, as_attachment=True)
 
 
@@ -140,6 +140,10 @@ def create_app(functions=None, auth_only=None):
 
     from . import signin
     oidc = signin.setup(app, auth_only)
+    if os.environ.get("PLATFORM_CLOUD") == "azure" and oidc is None:
+        raise RuntimeError("On Azure, shared sign-in (OIDC_ISSUER etc.) must be configured; built-in passwords are off.")
+    if os.environ.get("PLATFORM_CLOUD") == "azure" and config.SECRET_KEY in ("", "dev-change-me"):
+        raise RuntimeError("On Azure, INTRANET_SECRET must be set (from Key Vault).")
     if oidc is not None: app.extensions["demeisen_oidc"] = oidc
     app.teardown_appcontext(core.close_db)
     if auth_only:            # the sign-in-only function: no database, no pages

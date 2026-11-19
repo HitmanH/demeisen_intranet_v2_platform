@@ -88,7 +88,8 @@ def migrate():
     c = _as_migrator()
     try:
         applied = schema.run(c, REGISTRY)
-        c.execute("create user if not exists 'platform_app'@'%' identified with AWSAuthenticationPlugin as 'RDS' require ssl")
+        if os.environ.get("PLATFORM_CLOUD") != "azure":   # AWS only: on Azure the login is created by the Azure setup (step 3)
+            c.execute("create user if not exists 'platform_app'@'%' identified with AWSAuthenticationPlugin as 'RDS' require ssl")
         for table, rights in APP_GRANTS.items():
             c.execute(f"grant {rights} on `intranet`.`{table}` to 'platform_app'@'%'")
         c.commit()

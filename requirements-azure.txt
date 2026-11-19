@@ -1,0 +1,4 @@
+# Extra packages for the Azure image only (Dockerfile.azure); the AWS image uses requirements.txt alone.
+gunicorn==23.0.0
+azure-identity==1.25.1
+azure-storage-blob==12.27.1

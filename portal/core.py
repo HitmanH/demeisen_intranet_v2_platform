@@ -7,8 +7,8 @@ from functools import wraps
 from flask import g, session, request, redirect, url_for, render_template, current_app
 from . import dbconn, storage
 
-# ---------- working folders for generated files (S3 holds the real copies when FILES_BUCKET is set) ----------
-if storage.BUCKET or os.environ.get("AUTH_ONLY"):
+# ---------- working folders for generated files (the cloud copy is the real one when storage.REMOTE) ----------
+if storage.REMOTE or os.environ.get("AUTH_ONLY"):
     _SCRATCH = tempfile.mkdtemp(prefix="platform-")
     GEN, UPL = os.path.join(_SCRATCH, "generated"), os.path.join(_SCRATCH, "uploads")
 else:
@@ -38,13 +38,13 @@ def me():
 
 
 def audit(entity, eid, action, detail=""):
-    """Records an action in audit and, when AUDIT_BUCKET is set, as a write-once object that nobody (not even
+    """Records an action in audit and, when cloud audit storage is set, as a write-once object that nobody (not even
     an administrator) can change or delete until its retention date: the tamper-proof copy of the trail."""
     at = now()
     db().execute("insert into audit(at,user_id,entity,entity_id,action,detail) values(?,?,?,?,?,?)",
                  (at, session.get("uid"), entity, eid, action, detail))
     db().commit()
-    if storage.AUDIT_BUCKET:
+    if storage.AUDIT_REMOTE:
         u = me()
         rec = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "user_id": session.get("uid"),
                "user_email": u["email"] if u else None, "entity": entity, "entity_id": eid, "action": action,

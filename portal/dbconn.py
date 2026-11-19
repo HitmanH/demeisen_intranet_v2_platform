@@ -5,6 +5,8 @@ no others: portal `users`, `audit`; mnda `ndas`; memo `memos`, `signoffs`; docum
 App code keeps sqlite-style SQL (? placeholders, `insert or ignore`, `insert or replace`); it is translated for MySQL.
 
 On RDS the app signs in as `platform_app` with a short-lived IAM token, so no database password is stored anywhere.
+On Azure the passwords come from Key Vault (DB_PASSWORD for the app, DB_MIGRATOR_PASSWORD for migrations) and the
+server certificate is checked against the public CA certificates (DB_SSL_CA).
 """
 import os, re, sqlite3, time
 
@@ -40,7 +42,9 @@ def iam_token(host, user, port=3306):
 def mysql_connect(user=None, password=None, database="__default__"):
     import pymysql
     host, user = os.environ["DB_HOST"], user or os.environ.get("DB_USER", "platform_app")
-    if password is None: password = iam_token(host, user)
+    if password is None:
+        env = "DB_MIGRATOR_PASSWORD" if user.endswith("_migrator") else "DB_PASSWORD"
+        password = os.environ.get(env) or iam_token(host, user)
     return pymysql.connect(host=host, port=int(os.environ.get("DB_PORT", 3306)), user=user, password=password,
                            database=os.environ.get("DB_NAME", "intranet") if database == "__default__" else database, charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor,
                            autocommit=False, ssl={"ca": os.environ.get("DB_SSL_CA", "/app/rds-ca.pem")})

@@ -1,0 +1,20 @@
+# Platform container for Azure Container Apps: the web app (gunicorn) and the admin job (python -m portal.admin).
+# On AWS the Lambda image is built from Dockerfile instead; the app code is the same.
+FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends libreoffice-writer-nogui fonts-dejavu fonts-liberation ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY requirements.txt requirements-azure.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-azure.txt
+COPY portal ./portal
+COPY mnda ./mnda
+COPY memo ./memo
+COPY documents ./documents
+RUN useradd --create-home --uid 10001 app && mkdir -p /tmp/data && chown app /tmp/data && python -m compileall -q /app
+USER app
+# Azure Database for MySQL certificates chain to public roots (DigiCert Global Root G2 / Microsoft RSA Root 2017),
+# which are in the system CA bundle.
+ENV PLATFORM_PROD=1 PLATFORM_CLOUD=azure PYTHONUNBUFFERED=1 DB_SSL_CA=/etc/ssl/certs/ca-certificates.crt \
+    HOME=/home/app PLATFORM_DATA=/tmp/data PORT=8080
+EXPOSE 8080
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT} --workers 2 --threads 4 --timeout 120 --access-logfile - 'portal.app:create_app()'"]
