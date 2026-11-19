@@ -1,0 +1,81 @@
+# Deploys the platform to Azure on every merge to main (alongside the AWS deploy, until cut-over): builds the container
+# image, runs schema migrations as a Container Apps job, then switches the web app (once it exists) to the new image.
+# Signs in to Azure with no stored secret: GitHub's OIDC token, trusted only for this repo's main branch, maps to the
+# managed identity demeisen-v2-deploy-platform, which can push images and update only the platform app and its job.
+name: Deploy (Azure)
+on:
+  push:
+    branches: [main]
+    paths: ['portal/**', 'mnda/**', 'memo/**', 'documents/**', 'infra/azure/**', 'Dockerfile.azure', 'requirements*.txt', '.github/workflows/deploy-azure.yml']
+  workflow_dispatch:
+permissions: { id-token: write, contents: read }
+concurrency: deploy-azure
+env:
+  RG: Non_Inv
+  ACR: demeisenv2wdjkbofw.azurecr.io
+  IMAGE: demeisen-platform
+  APP: demeisen-v2-platform
+  MIGRATE_JOB: demeisen-v2-platform-admin
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Test
+        run: pip install -q -r requirements.txt -r requirements-azure.txt -r requirements-dev.txt && python -m pytest -q tests
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Build and push the image
+        run: |
+          set -euo pipefail
+          # Registry sign-in with the deploy identity's push right only (no registry admin user, no stored password).
+          AAD=$(az account get-access-token --query accessToken -o tsv)
+          REFRESH=$(curl -fsS -X POST "https://$ACR/oauth2/exchange" -H 'Content-Type: application/x-www-form-urlencoded' \
+            --data-urlencode grant_type=access_token --data-urlencode "service=$ACR" \
+            --data-urlencode "tenant=${{ vars.AZURE_TENANT_ID }}" --data-urlencode "access_token=$AAD" | jq -r .refresh_token)
+          echo "$REFRESH" | docker login "$ACR" -u 00000000-0000-0000-0000-000000000000 --password-stdin
+          docker build -f Dockerfile.azure -t "$ACR/$IMAGE:$GITHUB_SHA" -t "$ACR/$IMAGE:latest" .
+          docker push "$ACR/$IMAGE:$GITHUB_SHA"
+          docker push "$ACR/$IMAGE:latest"
+      - name: Is the app set up yet?
+        id: exists
+        run: |
+          az config set extension.use_dynamic_install=yes_without_prompt extension.dynamic_install_allow_preview=false >/dev/null 2>&1
+          if az containerapp job show -n "$MIGRATE_JOB" -g "$RG" --query name -o tsv >/dev/null 2>&1; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "ok=false" >> "$GITHUB_OUTPUT"
+               echo "::notice::Image pushed. The platform isn't set up in Azure yet: run infra/azure/app.bicep once (Azure step 6), then re-run this workflow."
+          fi
+          if az containerapp show -n "$APP" -g "$RG" --query name -o tsv >/dev/null 2>&1; then echo "web=true" >> "$GITHUB_OUTPUT"
+          else echo "web=false" >> "$GITHUB_OUTPUT"; echo "::notice::The web app isn't created yet (it waits for sign-in to be set up); only migrations ran."
+          fi
+      - name: Migrations (before the code that needs them)
+        if: steps.exists.outputs.ok == 'true'
+        run: |
+          set -euo pipefail
+          IMG="$ACR/$IMAGE:$GITHUB_SHA"
+          az containerapp job update -n "$MIGRATE_JOB" -g "$RG" --image "$IMG" -o none
+          EX=$(az containerapp job start -n "$MIGRATE_JOB" -g "$RG" --query name -o tsv)
+          echo "Migration run $EX"
+          for _ in $(seq 1 60); do
+            S=$(az containerapp job execution show -n "$MIGRATE_JOB" -g "$RG" --job-execution-name "$EX" --query properties.status -o tsv)
+            case "$S" in Succeeded) echo "Migrations applied (or none pending)."; break ;;
+              Failed|Stopped|Degraded) echo "::error::Migration run $EX: $S. The app was not updated. See the job's logs in the Azure portal."; exit 1 ;;
+            esac; sleep 10
+          done
+          [ "$S" = Succeeded ] || { echo "::error::Migration run $EX did not finish in 10 minutes."; exit 1; }
+      - name: Web app
+        if: steps.exists.outputs.web == 'true'
+        run: |
+          set -euo pipefail
+          az containerapp update -n "$APP" -g "$RG" --image "$ACR/$IMAGE:$GITHUB_SHA" -o none
+          FQDN=$(az containerapp show -n "$APP" -g "$RG" --query properties.configuration.ingress.fqdn -o tsv)
+          for _ in 1 2 3 4 5 6; do
+            h=$(curl -s -o /dev/null -w '%{http_code}' "https://$FQDN/healthz"); [ "$h" = 200 ] && break; sleep 10
+          done
+          echo "health $h (expected 200) at https://$FQDN/"
+          [ "$h" = 200 ] || echo "::warning::The platform on Azure isn't answering as expected yet."
