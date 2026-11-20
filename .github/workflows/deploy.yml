@@ -17,8 +17,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: actions/checkout@v5
+      - uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/demeisen-v2-github-platform-app
           aws-region: ${{ env.AWS_REGION }}
@@ -59,6 +59,8 @@ jobs:
           fi
       - name: Check the live site
         run: |
+          if [ "$(aws ssm get-parameter --name /demeisen/v2/redirect-to-azure --query Parameter.Value --output text 2>/dev/null)" = yes ]; then
+            echo "AWS v2 is redirecting to Azure (cut-over done); nothing to check here."; exit 0; fi
           ORIGIN=$(aws ssm get-parameter --name /demeisen/v2/edge/origin --query Parameter.Value --output text)
           for _ in 1 2 3 4 5 6 7 8 9 10; do
             code=$(curl -s -o /dev/null -w '%{http_code}' "$ORIGIN/healthz"); [ "$code" = 200 ] && break; sleep 30
