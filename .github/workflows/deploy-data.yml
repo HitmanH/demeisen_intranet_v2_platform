@@ -18,9 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: data
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: pip install -q cfn-lint pyyaml && cfn-lint data/data.yaml && python3 tools/check-guardrails.py data/data.yaml
-      - uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/demeisen-v2-github-platform-data
           aws-region: ${{ env.AWS_REGION }}
