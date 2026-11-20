@@ -32,6 +32,28 @@ resource appId 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' exi
 resource deployId 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = { name: 'demeisen-v2-deploy-platform' }
 
 var image = '${acr.properties.loginServer}/demeisen-platform:${imageTag}'
+
+// ---------- Audit copy: write-once (like S3 Object Lock on AWS). Every record is kept unchangeable for 7 years. ----------
+@description('Days each audit record cannot be changed or deleted (2555 = 7 years, as on AWS).')
+param auditRetentionDays int = 2555
+resource blobSvc 'Microsoft.Storage/storageAccounts/blobServices@2023-05-01' existing = { parent: store, name: 'default' }
+resource auditWorm 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobSvc
+  name: 'audit-worm'
+  properties: { immutableStorageWithVersioning: { enabled: true } }
+}
+// Unlocked policy: it already stops changes and deletion; locking it (irreversible) is a separate, deliberate step.
+resource auditPolicy 'Microsoft.Storage/storageAccounts/blobServices/containers/immutabilityPolicies@2023-05-01' = {
+  parent: auditWorm
+  name: 'default'
+  properties: { immutabilityPeriodSinceCreationInDays: auditRetentionDays, allowProtectedAppendWrites: false }
+}
+var blobContrib = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+resource auditWrite 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(auditWorm.id, appId.id, blobContrib)
+  scope: auditWorm
+  properties: { roleDefinitionId: blobContrib, principalId: appId.properties.principalId, principalType: 'ServicePrincipal' }
+}
 var kvUri = kv.properties.vaultUri
 var registries = [{ server: acr.properties.loginServer, identity: appId.id }]
 var commonEnv = [
@@ -41,6 +63,7 @@ var commonEnv = [
   { name: 'DB_PASSWORD', secretRef: 'db-password' }
   { name: 'AZURE_CLIENT_ID', value: appId.properties.clientId }
   { name: 'AZURE_STORAGE_ACCOUNT', value: store.name }
+  { name: 'AUDIT_CONTAINER', value: auditWorm.name }
   { name: 'CRM_URL', value: '/crm/' }
 ]
 

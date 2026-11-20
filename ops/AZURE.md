@@ -28,7 +28,13 @@ holds no data except the two MySQL servers, the storage account and Key Vault. A
   as API Gateway's JWT authorizer does on AWS.
 - Admin tasks: platform `python -m portal.admin migrate|status|list_ndas`; CRM `node src/job.mjs migrate|status|backup`.
 
+## Cut-over switch (AWS)
+`/demeisen/v2/redirect-to-azure` = `yes` makes the AWS v2 front door send every request to the Azure address
+(`/demeisen/v2/azure/url`); `no` turns AWS v2 back on. Applied by the platform's AWS Deploy workflow.
+
+## Audit copy
+Azure container `audit-worm`: version-level immutability, 7-year retention policy (unlocked; locking is irreversible
+and is a separate decision). The app writes there via `AUDIT_CONTAINER`.
+
 ## Still to do
-- Audit copy: the `audit` container is not yet write-once (AWS uses S3 Object Lock). Add version-level immutability
-  before cut-over.
 - Database servers: turn off public network access once everything uses the private links.

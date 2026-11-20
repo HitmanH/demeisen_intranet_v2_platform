@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 BUCKET = os.environ.get("FILES_BUCKET")
 AUDIT_BUCKET = os.environ.get("AUDIT_BUCKET")
 AZURE_ACCOUNT = os.environ.get("AZURE_STORAGE_ACCOUNT")
+AZURE_AUDIT_CONTAINER = os.environ.get("AUDIT_CONTAINER", "audit")   # write-once (version-level immutability) on Azure
 REGION = os.environ.get("AWS_REGION", "eu-west-2")
 REMOTE = bool(BUCKET or AZURE_ACCOUNT)            # files live in the cloud, not in local folders
 AUDIT_REMOTE = bool(AUDIT_BUCKET or AZURE_ACCOUNT)
@@ -73,7 +74,7 @@ def put_audit(record):
     body = json.dumps(record, default=str).encode()
     if AZURE_ACCOUNT:
         from azure.storage.blob import ContentSettings
-        blob().get_blob_client("audit", key).upload_blob(body, overwrite=False,
+        blob().get_blob_client(AZURE_AUDIT_CONTAINER, key).upload_blob(body, overwrite=False,
                                                          content_settings=ContentSettings(content_type="application/json"))
     else:
         s3().put_object(Bucket=AUDIT_BUCKET, Key=key, Body=body, ContentType="application/json", ChecksumAlgorithm="SHA256")
