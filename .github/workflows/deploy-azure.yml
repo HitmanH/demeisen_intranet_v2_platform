@@ -16,12 +16,13 @@ env:
   IMAGE: demeisen-platform
   APP: demeisen-v2-platform
   MIGRATE_JOB: demeisen-v2-platform-admin
+  FRONT_DOOR: https://demeisen-v2-ddacbfayfrb7g9ge.z03.azurefd.net
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: '3.12' }
       - name: Test
         run: pip install -q -r requirements.txt -r requirements-azure.txt -r requirements-dev.txt && python -m pytest -q tests
@@ -73,9 +74,8 @@ jobs:
         run: |
           set -euo pipefail
           az containerapp update -n "$APP" -g "$RG" --image "$ACR/$IMAGE:$GITHUB_SHA" -o none
-          FQDN=$(az containerapp show -n "$APP" -g "$RG" --query properties.configuration.ingress.fqdn -o tsv)
           for _ in 1 2 3 4 5 6; do
-            h=$(curl -s -o /dev/null -w '%{http_code}' "https://$FQDN/healthz"); [ "$h" = 200 ] && break; sleep 10
+            h=$(curl -s -o /dev/null -w '%{http_code}' "$FRONT_DOOR/healthz"); [ "$h" = 200 ] && break; sleep 10
           done
-          echo "health $h (expected 200) at https://$FQDN/"
+          echo "health $h (expected 200) at $FRONT_DOOR/"
           [ "$h" = 200 ] || echo "::warning::The platform on Azure isn't answering as expected yet."
