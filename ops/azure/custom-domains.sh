@@ -6,6 +6,7 @@
 #   bash custom-domains.sh rollback   sign-in back on the azurefd.net address (then set the SSM parameter back too)
 # Each step re-runs the repo's templates from GitHub main, so merge the change first. Re-runnable.
 set -euo pipefail
+az config set extension.use_dynamic_install=yes_without_prompt extension.dynamic_install_allow_preview=true >/dev/null 2>&1 || true
 az account set --subscription d8a79507-6e06-4265-9d9a-f7f05b4a9b79
 RG=Non_Inv; KV=demeisen-kv-c9895a; FD=demeisen-v2-fd
 MAIN=mycroft.demeisen.io; CRM=crm.demeisen.io; OLD=https://demeisen-v2-ddacbfayfrb7g9ge.z03.azurefd.net
@@ -17,15 +18,15 @@ frontdoor() {  # $1 = redirectDefaultDomain (true|false)
     || { echo "STOPPED: GitHub main doesn't have the custom-domain template yet: merge it, wait 5 minutes, re-run"; exit 1; }
   log "Custom domains on the front door (the template adopts these names):"
   az afd custom-domain list -g $RG --profile-name $FD --query "[].{name:name, host:hostName, validation:domainValidationState}" -o table
-  for d in $MAIN $CRM; do
-    n=$(az afd custom-domain list -g $RG --profile-name $FD --query "[?hostName=='$d'].name" -o tsv)
-    [ "$n" = "${d//./-}" ] || { echo "STOPPED: $d is named '$n' in Azure, expected '${d//./-}'"; exit 1; }
-  done
+  name_of() { az afd custom-domain list -g $RG --profile-name $FD --query "[?hostName=='$1'].name" -o tsv; }
+  MAINRES=$(name_of $MAIN); CRMRES=$(name_of $CRM)
+  [ -n "$MAINRES" ] && [ -n "$CRMRES" ] || { echo "STOPPED: add both domains in the portal first (Domains, + Add)"; exit 1; }
   CRMHOST=$(az afd origin show -g $RG --profile-name $FD --origin-group-name crm --origin-name crm --query hostName -o tsv)
   PLATHOST=$(az afd origin show -g $RG --profile-name $FD --origin-group-name platform --origin-name platform --query hostName -o tsv)
   OV=$(az keyvault secret show --vault-name $KV -n origin-verify --query value -o tsv)
   az deployment group create -g $RG -n demeisen-v2-frontdoor -f frontdoor.bicep -p crmHost="$CRMHOST" platformHost="$PLATHOST" \
-    originVerify="$OV" mainDomain=$MAIN crmDomain=$CRM redirectDefaultDomain=$1 --query properties.outputs -o json
+    originVerify="$OV" mainDomain=$MAIN crmDomain=$CRM mainDomainResource="$MAINRES" crmDomainResource="$CRMRES" \
+    redirectDefaultDomain=$1 --query properties.outputs -o json
   unset OV
   log "Front door updated. Changes take up to 15 minutes to reach every edge; certificates can take up to an hour."
 }
