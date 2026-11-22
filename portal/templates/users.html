@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block title %}Users{% endblock %}{% block body %}<h1>Settings &middot; Users</h1>
+<p class="muted">The same people sign in to the intranet and the CRM. Nobody can see or set someone else's password:
+add a person or press <i>Setup link</i>, then send them the link yourself. It works once, for 24 hours, and resets their password and 2FA.</p>
+{% if not own %}<div class="flash error">Own sign-in is not switched on here (LOCAL_SIGNIN), so setup links can't be used yet.</div>{% endif %}
+{% if link %}<div class="flash"><b>Setup link</b> (shown only now; send it only to that person):<br>
+<input readonly value="{{ link[1] }}" style="width:100%" onclick="this.select()"></div>{% endif %}
+<table><tr><th>Name</th><th>Email</th><th>Role</th><th>Sign-in</th><th>Last signed in</th><th></th></tr>
+{% for r in rows %}<tr><td>{{ r.name }}</td><td>{{ r.email }}</td><td>{{ "Administrator" if r.admin else "Member" }}</td>
+<td>{% if not r.active %}Disabled{% elif r.locked_until and r.locked_until > now %}Locked{% elif r.totp_on %}Password + 2FA{% elif r.setup_expires and r.setup_expires > now %}Setup link sent{% else %}Previous sign-in only{% endif %}</td>
+<td>{{ (r.last_signin or "")|fromiso }}</td>
+<td><form method="post" style="display:flex;gap:.4em;flex-wrap:wrap;margin:0"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="uid" value="{{ r.id }}">
+<button name="action" value="link" onclick="return confirm('Send a new setup link to {{ r.name }}? Their current password and 2FA stop working.')">Setup link</button>
+{% if r.locked_until and r.locked_until > now %}<button name="action" value="unlock">Unlock</button>{% endif %}
+{% if r.id != me_id %}<button name="action" value="{{ 'disable' if r.active else 'enable' }}">{{ "Disable" if r.active else "Enable" }}</button>
+<button name="action" value="{{ 'remove_admin' if r.admin else 'make_admin' }}">{{ "Remove admin" if r.admin else "Make admin" }}</button>{% endif %}
+</form></td></tr>{% endfor %}</table>
+<h2>Add a person</h2>
+<form method="post" class="card narrow"><input type="hidden" name="csrf" value="{{ csrf_token() }}"><input type="hidden" name="action" value="add">
+<label>Name<input name="name" required></label><label>Email<input name="email" type="email" required></label>
+<label><input type="checkbox" name="admin" value="1"> Administrator</label><button>Add and create setup link</button></form>
+{% endblock %}

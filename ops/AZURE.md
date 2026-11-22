@@ -78,3 +78,20 @@ and is a separate decision). The app writes there via `AUDIT_CONTAINER`.
 ## Still to do
 - Lock the audit container's retention policy (irreversible) once you're happy with 7 years.
 - Database servers: public network access is on but with no firewall rules (closed); can be switched off entirely.
+
+## Own sign-in (replacing Cognito, one person at a time)
+
+`portal/accounts.py`: email + password + authenticator-app code. One list of people, managed by administrators at
+**mycroft.demeisen.io > Settings > Users**, signs in to the intranet and the CRM (the intranet is the CRM's sign-in
+service: `/oauth2/*`, client `demeisen-crm`). Nobody sees anyone else's password: an administrator issues a one-time
+setup link (24 hours) and the person sets their own password and scans their own QR code. Lock-out after 5 failures
+(15 minutes, or *Unlock*); every sign-in and admin action is in the audit trail.
+
+1. Merge the platform and CRM changes; wait for both deploys.
+2. Cloud Shell: `bash own-signin.sh trial` (ops/azure). Creates `platform-accounts-key` and `platform-oidc-signing-key`
+   in Key Vault, switches it on. Nothing changes for anyone else: mycroft still goes to Cognito by default.
+3. Russell: Settings > Users > *Setup link* on his own row; open it, set password, scan the code.
+   Then sign out and use https://mycroft.demeisen.io/signin, and the CRM at https://crm.demeisen.io/crm/.
+   (crm.demeisen.io signs in through mycroft; anyone without their own sign-in yet is passed on to Cognito.)
+4. When it's right: setup link for Richard, then `bash own-signin.sh everyone`. Later: retire the Cognito pool.
+   `bash own-signin.sh off` goes back to Cognito only at any point.

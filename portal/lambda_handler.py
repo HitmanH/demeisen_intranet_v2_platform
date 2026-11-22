@@ -36,6 +36,8 @@ APP_GRANTS = {
     "signoffs": "SELECT, INSERT, UPDATE, DELETE",
     "issues": "SELECT, INSERT, UPDATE",
     "schema_migrations": "SELECT",
+    "accounts": "SELECT, INSERT, UPDATE",          # own sign-in (accounts.py)
+    "oauth_codes": "SELECT, INSERT, UPDATE, DELETE",
 }
 PROTECTED = {"mysql", "sys", "information_schema", "performance_schema", "intranet"}
 

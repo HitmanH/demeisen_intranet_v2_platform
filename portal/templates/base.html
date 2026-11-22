@@ -9,7 +9,7 @@
 {% if me %}<div class="appbar"><div class="wrap">
   <a class="brand" href="/"><i class="brand-mark" aria-hidden="true"></i>{{ cfg.BRAND_NAME }}</a>
   <nav class="appbar-apps" aria-label="Apps">{% for a in cfg.APPS %}<a href="{{ a.url }}"{% if a.current %} aria-current="true"{% endif %}>{{ a.title }}</a>{% endfor %}</nav>
-  <div class="appbar-user"><span>{{ me.name }}</span>{% if not shared_signin %}<a href="/password">Password</a>{% endif %}<a href="/logout">Sign out</a></div>
+  <div class="appbar-user"><span>{{ me.name }}</span>{% if me.admin and own_signin %}<a href="/settings/users"{% if here.startswith('/settings') %} aria-current="page"{% endif %}>Settings</a>{% endif %}{% if not shared_signin and not own_signin %}<a href="/password">Password</a>{% endif %}<a href="/logout">Sign out</a></div>
 </div></div>
 <header class="top appnav"><div class="wrap">
   <nav class="tabs" aria-label="Sections">
