@@ -12,7 +12,8 @@ HAS_SOFFICE = shutil.which("soffice") is not None
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("PLATFORM_DATA", str(tmp_path))
     for k in ("DB_HOST", "OIDC", "OIDC_ISSUER", "OIDC_SECRET_NAME", "FILES_BUCKET", "AUDIT_BUCKET", "AUTH_ONLY", "ORIGIN_VERIFY",
-              "PLATFORM_CLOUD", "AZURE_STORAGE_ACCOUNT", "INTRANET_SECRET", "DB_PASSWORD", "DB_MIGRATOR_PASSWORD"):
+              "PLATFORM_CLOUD", "AZURE_STORAGE_ACCOUNT", "INTRANET_SECRET", "DB_PASSWORD", "DB_MIGRATOR_PASSWORD", "LOCAL_SIGNIN",
+              "SIGNIN_DEFAULT", "LOCAL_ISSUER", "CRM_REDIRECT_URIS", "OIDC_SIGNING_KEY", "ACCOUNTS_KEY"):
         monkeypatch.delenv(k, raising=False)
     for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents")]:
         del sys.modules[m]
@@ -43,7 +44,7 @@ def test_one_database_same_tables_as_v1(client):
     con = sqlite3.connect(os.path.join(client.tmp, "intranet.db"))
     tables = {r[0] for r in con.execute("select name from sqlite_master where type='table'")}
     assert {"users", "ndas", "issues", "memos", "signoffs", "audit"} <= tables
-    assert tables - {"users", "ndas", "issues", "memos", "signoffs", "audit"} == {"schema_migrations"}
+    assert tables - {"users", "ndas", "issues", "memos", "signoffs", "audit"} == {"schema_migrations", "accounts", "oauth_codes"}
 
 
 def test_memo_sign_off_by_every_member(client):
