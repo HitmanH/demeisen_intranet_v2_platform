@@ -17,13 +17,19 @@ param originVerify string = ''
 param mainDomain string = ''
 @description('A name that only redirects to mainDomain + /crm/, e.g. crm.demeisen.io (empty = none)')
 param crmDomain string = ''
+@description('Azure resource names of those two domains (the portal adds a suffix, e.g. mycroft-demeisen-io-ae9a); empty = dots -> hyphens')
+param mainDomainResource string = ''
+param crmDomainResource string = ''
 @description('Also redirect the azurefd.net address to mainDomain (after sign-in has moved there)')
 param redirectDefaultDomain bool = false
 
 var tags = { system: 'demeisen-v2', managedBy: 'platform/infra/azure/frontdoor.bicep' }
 var connect = !empty(crmHost) && !empty(platformHost) && !empty(originVerify)
-// Resource names as the portal made them (dots -> hyphens), so this template adopts the existing domains.
-var domainNames = filter([mainDomain, crmDomain], d => !empty(d))
+// Adopt the domains created in the portal under their existing resource names.
+var domainList = filter([
+  { host: mainDomain, name: empty(mainDomainResource) ? replace(mainDomain, '.', '-') : mainDomainResource }
+  { host: crmDomain, name: empty(crmDomainResource) ? replace(crmDomain, '.', '-') : crmDomainResource }
+], d => !empty(d.host))
 
 resource profile 'Microsoft.Cdn/profiles@2024-02-01' = {
   name: 'demeisen-v2-fd'
@@ -41,11 +47,11 @@ resource endpoint 'Microsoft.Cdn/profiles/afdEndpoints@2024-02-01' = {
   properties: { enabledState: 'Enabled' }
 }
 
-resource domains 'Microsoft.Cdn/profiles/customDomains@2024-02-01' = [for d in domainNames: {
+resource domains 'Microsoft.Cdn/profiles/customDomains@2024-02-01' = [for d in domainList: {
   parent: profile
-  name: replace(d, '.', '-')
+  name: d.name
   properties: {
-    hostName: d
+    hostName: d.host
     tlsSettings: { certificateType: 'ManagedCertificate', minimumTlsVersion: 'TLS12' }
   }
 }]
@@ -133,7 +139,7 @@ resource routes 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-02-01' = [for (
   properties: {
     originGroup: { id: groups[i].id }
     ruleSets: concat(empty(redirects) ? [] : [{ id: redirectSet.id }], [{ id: ruleSet.id }])
-    customDomains: [for (d, j) in domainNames: { id: domains[j].id }]
+    customDomains: [for (d, j) in domainList: { id: domains[j].id }]
     supportedProtocols: ['Http', 'Https']
     patternsToMatch: a.patterns
     forwardingProtocol: 'HttpsOnly'
