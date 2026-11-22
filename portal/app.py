@@ -52,6 +52,7 @@ def login():
 
 @bp.route("/logout")
 def logout():
+    if session.get("local"): return redirect(url_for("accounts.signout"))
     if _oidc(): return redirect("/auth/logout")
     session.clear(); return redirect(url_for("portal.login"))
 
@@ -106,6 +107,8 @@ def load_functions(names=None):
     """Import each function package and let it register its blueprint, menu entries, cards and migrations."""
     REGISTRY.__init__()
     REGISTRY.migrations["portal"] = MIGRATIONS
+    from . import accounts
+    REGISTRY.migrations["accounts"] = accounts.MIGRATIONS
     mods = []
     for name in names if names is not None else config.FUNCTIONS:
         m = importlib.import_module(name)
@@ -151,6 +154,8 @@ def create_app(functions=None, auth_only=None):
 
     mods = load_functions(functions)
     app.register_blueprint(bp)
+    from . import accounts
+    accounts.init(app)
     for m in mods: app.register_blueprint(m.bp)
 
     @app.context_processor
