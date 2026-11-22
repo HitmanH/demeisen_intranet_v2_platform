@@ -20,6 +20,14 @@ param oidcLogoutUrl string = 'https://demeisen-crm-poc.auth.eu-west-2.amazoncogn
 param publicUrl string = ''
 @secure()
 param originVerify string = ''
+// Own sign-in (portal/accounts.py): password + authenticator code, users managed under Settings -> Users, and the
+// sign-in hub for the CRM. Needs Key Vault secrets platform-accounts-key and platform-oidc-signing-key (an RSA key).
+param ownSignin bool = false
+@allowed(['cognito', 'local'])
+@description('Where people who are not signed in are sent: cognito (trial: own sign-in only at /signin) or local.')
+param signinDefault string = 'cognito'
+param signinIssuer string = 'https://mycroft.demeisen.io'
+param crmRedirectUris string = 'https://crm.demeisen.io/crm/,https://mycroft.demeisen.io/crm/'
 
 var sfx = take(uniqueString(resourceGroup().id), 8)
 var tags = { system: 'demeisen-v2', app: 'platform', managedBy: 'platform/infra/azure/app.bicep' }
@@ -84,7 +92,10 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (enableWeb) {
         { name: 'db-password', keyVaultUrl: '${kvUri}secrets/mysql-platform-app', identity: appId.id }
         { name: 'flask-secret', keyVaultUrl: '${kvUri}secrets/platform-flask-secret', identity: appId.id }
         { name: 'oidc-client-secret', keyVaultUrl: '${kvUri}secrets/platform-oidc-client-secret', identity: appId.id }
-      ], empty(originVerify) ? [] : [{ name: 'origin-verify', value: originVerify }])
+      ], empty(originVerify) ? [] : [{ name: 'origin-verify', value: originVerify }], !ownSignin ? [] : [
+        { name: 'accounts-key', keyVaultUrl: '${kvUri}secrets/platform-accounts-key', identity: appId.id }
+        { name: 'oidc-signing-key', keyVaultUrl: '${kvUri}secrets/platform-oidc-signing-key', identity: appId.id }
+      ])
     }
     template: {
       containers: [{
@@ -98,7 +109,14 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (enableWeb) {
           { name: 'OIDC_CLIENT_SECRET', secretRef: 'oidc-client-secret' }
           { name: 'OIDC_LOGOUT_URL', value: oidcLogoutUrl }
           { name: 'PUBLIC_URL', value: publicUrl }
-        ], empty(originVerify) ? [] : [{ name: 'ORIGIN_VERIFY', secretRef: 'origin-verify' }])
+        ], empty(originVerify) ? [] : [{ name: 'ORIGIN_VERIFY', secretRef: 'origin-verify' }], !ownSignin ? [] : [
+          { name: 'LOCAL_SIGNIN', value: '1' }
+          { name: 'SIGNIN_DEFAULT', value: signinDefault }
+          { name: 'LOCAL_ISSUER', value: signinIssuer }
+          { name: 'CRM_REDIRECT_URIS', value: crmRedirectUris }
+          { name: 'ACCOUNTS_KEY', secretRef: 'accounts-key' }
+          { name: 'OIDC_SIGNING_KEY', secretRef: 'oidc-signing-key' }
+        ])
         probes: [{ type: 'Liveness', httpGet: { path: '/healthz', port: 8080 }, periodSeconds: 30, initialDelaySeconds: 10 }]
       }]
       scale: { minReplicas: 0, maxReplicas: 2 }
