@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Demeisen v2: move the intranet to its own names on demeisen.io (DNS at Porkbun). Azure Cloud Shell:
-#   bash custom-domains.sh attach     1) attach mycroft.demeisen.io + crm.demeisen.io to the front door (sign-in unchanged)
+#   bash custom-domains.sh attach     1) attach mycroft.demeisen.io + crm.demeisen.io to the front door (sign-in unchanged);
+#                                        re-run it after template changes (e.g. crm.demeisen.io as the CRM's own address)
 #   bash custom-domains.sh signin     3) after the AWS step (ops/AZURE.md): the platform signs people in at mycroft
 #   bash custom-domains.sh retire-old 4) send the old azurefd.net address to mycroft too
 #   bash custom-domains.sh rollback   sign-in back on the azurefd.net address (then set the SSM parameter back too)
@@ -28,6 +29,13 @@ frontdoor() {  # $1 = redirectDefaultDomain (true|false)
     originVerify="$OV" mainDomain=$MAIN crmDomain=$CRM mainDomainResource="$MAINRES" crmDomainResource="$CRMRES" \
     redirectDefaultDomain=$1 --query properties.outputs -o json
   unset OV
+  # Rules this template no longer makes (crm.demeisen.io used to redirect to mycroft); incremental deploys leave them behind.
+  if az afd rule show -g $RG --profile-name $FD --rule-set-name hostredirect --rule-name crmtomain -o none 2>/dev/null; then
+    az afd rule delete -g $RG --profile-name $FD --rule-set-name hostredirect --rule-name crmtomain --yes -o none && log "Removed old rule crmtomain"
+  fi
+  if [ "$1" = false ] && az afd rule-set show -g $RG --profile-name $FD --rule-set-name hostredirect -o none 2>/dev/null; then
+    az afd rule-set delete -g $RG --profile-name $FD --rule-set-name hostredirect --yes -o none && log "Removed unused rule set hostredirect"
+  fi
   log "Front door updated. Changes take up to 15 minutes to reach every edge; certificates can take up to an hour."
 }
 
@@ -43,7 +51,7 @@ platform_url() {  # $1 = the address the platform signs people in at
 W=~/custom-domains; mkdir -p "$W"; cd "$W"
 case "${1:-}" in
   attach)     frontdoor false
-              log "Check: https://$MAIN/healthz should answer OK, https://$CRM should go to https://$MAIN/crm/" ;;
+              log "Check: https://$MAIN/healthz should answer OK, https://$CRM should go to https://$CRM/crm/" ;;
   signin)     platform_url "https://$MAIN" ;;
   retire-old) frontdoor true ;;
   rollback)   frontdoor false; platform_url "$OLD" ;;

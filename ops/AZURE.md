@@ -2,7 +2,7 @@
 
 **Azure is the live system since the cut-over on 2026-11-20 (about 01:08 UTC):**
 https://demeisen-v2-ddacbfayfrb7g9ge.z03.azurefd.net (intranet at `/`, CRM at `/crm/`), moving to
-https://mycroft.demeisen.io (see "Own names" below); https://crm.demeisen.io goes to https://mycroft.demeisen.io/crm/.
+https://mycroft.demeisen.io (see "Own names" below); the CRM is also at its own address, https://crm.demeisen.io/crm/.
 The old AWS address (d1o33fjv6i8x8t.cloudfront.net) redirects there. AWS v2 is frozen, unchanged, as the fallback.
 Sign-in stays on the Demeisen Cognito pool (username, password, 2FA) by decision; it is the one AWS piece kept.
 
@@ -39,7 +39,10 @@ account and Key Vault. All templates are in this repo
 `demeisen.io` is registered at Porkbun (kept apart from the public demeisen.co.uk). Its DNS: `mycroft` and `crm` are
 CNAMEs to the front door's endpoint; `_dnsauth.*` TXT records prove ownership to Front Door; `v=spf1 -all` and
 `_dmarc` (`p=reject`) because the domain sends no email. Front Door issues and renews the certificates.
-One address for sign-in and cookies: `crm.demeisen.io` only redirects to `mycroft.demeisen.io/crm/`.
+The CRM is at `mycroft.demeisen.io/crm/` and at its own `crm.demeisen.io/crm/` (`crm.demeisen.io` alone redirects
+there). The CRM signs in with its own Cognito client and keeps its token per address, so each address has its own
+sign-in; its client accepts both (SSM `/demeisen/v2/azure/url` and `/demeisen/v2/azure/crm-url`, read by the CRM's
+AWS app stack). To move the CRM's address: change `crm-url`, run the CRM's AWS **Deploy**, then `custom-domains.sh attach`.
 
 Switching over (Azure Cloud Shell runs `ops/azure/custom-domains.sh`; merge it to main first):
 1. `bash custom-domains.sh attach`: both names on the front door. Sign-in still uses the azurefd.net address.

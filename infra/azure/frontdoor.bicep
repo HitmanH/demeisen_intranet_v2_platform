@@ -5,8 +5,9 @@
 // Run without origins first to get the address; run again with the apps' hostnames to connect them.
 //   az deployment group create -g Non_Inv -f frontdoor.bicep [-p crmHost=... platformHost=... originVerify=...]
 // Custom names (DNS at Porkbun, CNAME -> the endpoint; certificates managed by Front Door): mycroft.demeisen.io is the
-// address people use; crm.demeisen.io sends people to mycroft.demeisen.io/crm/ (one sign-in, one cookie, one origin
-// per app). redirectDefaultDomain=true also sends the old azurefd.net address there. ops/azure/custom-domains.sh runs it.
+// intranet's address (CRM also at /crm/); crm.demeisen.io is the CRM's own address: /crm/* there goes to the CRM, and
+// anything else there is sent to crm.demeisen.io/crm/ (the CRM signs in with its own Cognito client, so it works on
+// either name). redirectDefaultDomain=true also sends the old azurefd.net address to mycroft. custom-domains.sh runs it.
 targetScope = 'resourceGroup'
 
 param crmHost string = ''
@@ -15,7 +16,7 @@ param platformHost string = ''
 param originVerify string = ''
 @description('The address people use, e.g. mycroft.demeisen.io (empty = only the azurefd.net address)')
 param mainDomain string = ''
-@description('A name that only redirects to mainDomain + /crm/, e.g. crm.demeisen.io (empty = none)')
+@description('The CRM\'s own name, e.g. crm.demeisen.io (empty = none); its root redirects to /crm/ on the same name')
 param crmDomain string = ''
 @description('Azure resource names of those two domains (the portal adds a suffix, e.g. mycroft-demeisen-io-ae9a); empty = dots -> hyphens')
 param mainDomainResource string = ''
@@ -104,41 +105,60 @@ resource verifyRule 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = if (con
   }
 }
 
-// Redirects, before anything else: crm.demeisen.io -> mainDomain/crm/; optionally azurefd.net (host '') -> mainDomain.
-var redirects = concat(
-  empty(crmDomain) || empty(mainDomain) ? [] : [{ name: 'crmtomain', host: crmDomain, path: '/crm/' }],
-  redirectDefaultDomain && !empty(mainDomain) ? [{ name: 'defaulttomain', host: '', path: '' }] : [])
-resource redirectSet 'Microsoft.Cdn/profiles/ruleSets@2024-02-01' = if (connect && !empty(redirects)) {
+// Redirects, before anything else.
+// crm.demeisen.io: only requests that miss the CRM route (/crm, /crm/*) reach the platform route, so this rule set sits
+// on the platform route alone and sends them to crm.demeisen.io/crm/.
+resource crmHostSet 'Microsoft.Cdn/profiles/ruleSets@2024-02-01' = if (connect && !empty(crmDomain)) {
   parent: profile
-  name: 'hostredirect'
+  name: 'crmhost'
 }
-@batchSize(1)
-resource redirectRules 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = [for (r, i) in redirects: if (connect) {
-  parent: redirectSet
-  name: r.name
+resource crmHostRule 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = if (connect && !empty(crmDomain)) {
+  parent: crmHostSet
+  name: 'tocrmpage'
   properties: {
-    order: i + 1
+    order: 1
     conditions: [{
       name: 'HostName'
-      parameters: { typeName: 'DeliveryRuleHostNameConditionParameters', operator: 'Equal', negateCondition: false, matchValues: [empty(r.host) ? endpoint.properties.hostName : r.host], transforms: ['Lowercase'] }
+      parameters: { typeName: 'DeliveryRuleHostNameConditionParameters', operator: 'Equal', negateCondition: false, matchValues: [crmDomain], transforms: ['Lowercase'] }
     }]
     actions: [{
       name: 'UrlRedirect'
-      parameters: union({ typeName: 'DeliveryRuleUrlRedirectActionParameters', redirectType: 'Found', destinationProtocol: 'Https', customHostname: mainDomain },
-        empty(r.path) ? {} : { customPath: r.path })
+      parameters: { typeName: 'DeliveryRuleUrlRedirectActionParameters', redirectType: 'Found', destinationProtocol: 'Https', customHostname: crmDomain, customPath: '/crm/' }
     }]
     matchProcessingBehavior: 'Stop'
   }
-}]
+}
+// The old azurefd.net address -> mainDomain, same path (both routes), once sign-in has moved.
+var retireDefault = connect && redirectDefaultDomain && !empty(mainDomain)
+resource redirectSet 'Microsoft.Cdn/profiles/ruleSets@2024-02-01' = if (retireDefault) {
+  parent: profile
+  name: 'hostredirect'
+}
+resource defaultRule 'Microsoft.Cdn/profiles/ruleSets/rules@2024-02-01' = if (retireDefault) {
+  parent: redirectSet
+  name: 'defaulttomain'
+  properties: {
+    order: 1
+    conditions: [{
+      name: 'HostName'
+      parameters: { typeName: 'DeliveryRuleHostNameConditionParameters', operator: 'Equal', negateCondition: false, matchValues: [endpoint.properties.hostName], transforms: ['Lowercase'] }
+    }]
+    actions: [{
+      name: 'UrlRedirect'
+      parameters: { typeName: 'DeliveryRuleUrlRedirectActionParameters', redirectType: 'Found', destinationProtocol: 'Https', customHostname: mainDomain }
+    }]
+    matchProcessingBehavior: 'Stop'
+  }
+}
 
 @batchSize(1)
 resource routes 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-02-01' = [for (a, i) in apps: if (connect) {
   parent: endpoint
   name: a.key
-  dependsOn: [origins, verifyRule, redirectRules]
+  dependsOn: [origins, verifyRule, crmHostRule, defaultRule]
   properties: {
     originGroup: { id: groups[i].id }
-    ruleSets: concat(empty(redirects) ? [] : [{ id: redirectSet.id }], [{ id: ruleSet.id }])
+    ruleSets: concat(retireDefault ? [{ id: redirectSet.id }] : [], a.key == 'platform' && !empty(crmDomain) ? [{ id: crmHostSet.id }] : [], [{ id: ruleSet.id }])
     customDomains: [for (d, j) in domainList: { id: domains[j].id }]
     supportedProtocols: ['Http', 'Https']
     patternsToMatch: a.patterns
