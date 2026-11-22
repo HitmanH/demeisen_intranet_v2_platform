@@ -1,7 +1,8 @@
 # Demeisen v2 on Azure
 
 **Azure is the live system since the cut-over on 2026-11-20 (about 01:08 UTC):**
-https://demeisen-v2-ddacbfayfrb7g9ge.z03.azurefd.net (intranet at `/`, CRM at `/crm/`).
+https://demeisen-v2-ddacbfayfrb7g9ge.z03.azurefd.net (intranet at `/`, CRM at `/crm/`), moving to
+https://mycroft.demeisen.io (see "Own names" below); https://crm.demeisen.io goes to https://mycroft.demeisen.io/crm/.
 The old AWS address (d1o33fjv6i8x8t.cloudfront.net) redirects there. AWS v2 is frozen, unchanged, as the fallback.
 Sign-in stays on the Demeisen Cognito pool (username, password, 2FA) by decision; it is the one AWS piece kept.
 
@@ -33,6 +34,25 @@ account and Key Vault. All templates are in this repo
 - **CRM API**: on Azure, `src/server.mjs` checks the Cognito ID token itself (issuer, audience, signature, expiry),
   as API Gateway's JWT authorizer does on AWS.
 - Admin tasks: platform `python -m portal.admin migrate|status|list_ndas`; CRM `node src/job.mjs migrate|status|backup`.
+
+## Own names: mycroft.demeisen.io and crm.demeisen.io
+`demeisen.io` is registered at Porkbun (kept apart from the public demeisen.co.uk). Its DNS: `mycroft` and `crm` are
+CNAMEs to the front door's endpoint; `_dnsauth.*` TXT records prove ownership to Front Door; `v=spf1 -all` and
+`_dmarc` (`p=reject`) because the domain sends no email. Front Door issues and renews the certificates.
+One address for sign-in and cookies: `crm.demeisen.io` only redirects to `mycroft.demeisen.io/crm/`.
+
+Switching over (Azure Cloud Shell runs `ops/azure/custom-domains.sh`; merge it to main first):
+1. `bash custom-domains.sh attach`: both names on the front door. Sign-in still uses the azurefd.net address.
+   Check `https://mycroft.demeisen.io/healthz` answers and has a valid certificate (can take up to an hour).
+2. AWS CloudShell: `aws ssm put-parameter --name /demeisen/v2/azure/url --value https://mycroft.demeisen.io --overwrite`,
+   then run the **Deploy** workflow (AWS) in this repo and in the CRM repo: both Cognito sign-in clients then accept
+   mycroft, and the old CloudFront address redirects there. From here until step 3, platform sign-in fails, so do
+   step 3 straight after (sessions already signed in carry on).
+3. `bash custom-domains.sh signin`: the platform signs people in at mycroft. Test the intranet and the CRM.
+4. When happy: `bash custom-domains.sh retire-old` sends the azurefd.net address to mycroft as well.
+
+Undo: `bash custom-domains.sh rollback`, set the SSM parameter back to the azurefd.net address, re-run both Deploy
+workflows.
 
 ## Fallback to AWS v2 (if ever needed)
 1. `aws ssm put-parameter --name /demeisen/v2/redirect-to-azure --value no --overwrite`, then run the platform's AWS

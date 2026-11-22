@@ -16,7 +16,7 @@ env:
   IMAGE: demeisen-platform
   APP: demeisen-v2-platform
   MIGRATE_JOB: demeisen-v2-platform-admin
-  FRONT_DOOR: https://demeisen-v2-ddacbfayfrb7g9ge.z03.azurefd.net
+  FRONT_DOOR: https://mycroft.demeisen.io
 jobs:
   deploy:
     runs-on: ubuntu-latest
