@@ -214,7 +214,12 @@ def signin_code():
             session.clear(); session.permanent = True
             session["uid"] = p["uid"]; session["local"] = True; session["signed_in_at"] = int(time.time())
             _audit(p["uid"], "signed in", request.remote_addr or "", uid=p["uid"])
-            return redirect(p["next"])
+            resp = redirect(p["next"])
+            # Remember (for a year) that this browser uses the own sign-in, so the CRM and the intranet send it here
+            # rather than to the previous sign-in during the trial. Holds no identity, only the preference.
+            resp.set_cookie("signin", "own", max_age=365 * 86400, secure=request.is_secure or bool(os.environ.get("PLATFORM_PROD")),
+                            httponly=True, samesite="Lax")
+            return resp
         ip_fail(); note_fail(p["uid"], "code")
         flash("That code didn't work. Check your authenticator app and try again.", "error")
     return render_template("signin_code.html")

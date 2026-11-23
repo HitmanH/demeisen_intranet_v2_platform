@@ -159,3 +159,24 @@ def test_disabled_person_is_signed_out(c):
     tok, _ = csrf(rich, "/settings/users")
     rich.post("/settings/users", data={"csrf": tok, "action": "disable", "uid": 2})
     assert c.get("/").status_code == 302
+
+
+def test_browser_that_used_own_signin_is_sent_back_to_it(c, monkeypatch):
+    from portal import core
+    old_login(c); secret = do_setup(c, setup_link(c)); fresh(c)
+    r = own_signin(c, secret)
+    assert "signin=own" in r.headers.get("Set-Cookie", "")
+    fresh(c)
+    with c.app.test_request_context("/x", headers={"Cookie": "signin=own"}):
+        monkeypatch.setenv("SIGNIN_DEFAULT", "cognito")
+        c.app.extensions["demeisen_oidc"] = type("O", (), {"login_url": lambda self, n: "/auth/login?next=" + n, "email": lambda self: None})()
+        try:
+            assert core.sign_in_url("/x").startswith("/signin")
+        finally:
+            del c.app.extensions["demeisen_oidc"]
+    with c.app.test_request_context("/x"):
+        c.app.extensions["demeisen_oidc"] = type("O", (), {"login_url": lambda self, n: "/auth/login?next=" + n, "email": lambda self: None})()
+        try:
+            assert core.sign_in_url("/x").startswith("/auth/login")   # other browsers (Richard) keep the previous sign-in
+        finally:
+            del c.app.extensions["demeisen_oidc"]

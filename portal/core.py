@@ -74,12 +74,13 @@ def signed_in_uid():
 
 
 def sign_in_url(next_path):
-    """Where someone who isn't signed in goes: own sign-in when SIGNIN_DEFAULT=local (or nothing else is set up),
-    otherwise the shared (Cognito) sign-in."""
+    """Where someone who isn't signed in goes: own sign-in when SIGNIN_DEFAULT=local, when nothing else is set up, or
+    when this browser has signed in with it before (cookie `signin=own`); otherwise the shared (Cognito) sign-in."""
     import urllib.parse
     oidc = current_app.extensions.get("demeisen_oidc")
     own = os.environ.get("LOCAL_SIGNIN") == "1"
-    if own and (os.environ.get("SIGNIN_DEFAULT") == "local" or oidc is None):
+    moved = request.cookies.get("signin") == "own"     # this browser has used the own sign-in (accounts.py)
+    if own and (os.environ.get("SIGNIN_DEFAULT") == "local" or oidc is None or moved):
         return "/signin?" + urllib.parse.urlencode({"next": next_path})
     if oidc is not None: return oidc.login_url(next_path)
     return url_for("portal.login", next=next_path)
