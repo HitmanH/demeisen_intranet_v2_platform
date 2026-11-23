@@ -51,7 +51,7 @@ platform_url() {  # $1 = the address the platform signs people in at
 W=~/custom-domains; mkdir -p "$W"; cd "$W"
 case "${1:-}" in
   attach)     frontdoor false
-              log "Check: https://$MAIN/healthz should answer OK, https://$CRM should go to https://$CRM/crm/" ;;
+              log "Check: https://$MAIN/healthz should answer OK, https://$CRM should show the CRM at https://$CRM/" ;;
   signin)     platform_url "https://$MAIN" ;;
   retire-old) frontdoor true ;;
   rollback)   frontdoor false; platform_url "$OLD" ;;
