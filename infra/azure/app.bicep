@@ -27,7 +27,7 @@ param ownSignin bool = false
 @description('Where people who are not signed in are sent: cognito (trial: own sign-in only at /signin) or local.')
 param signinDefault string = 'cognito'
 param signinIssuer string = 'https://mycroft.demeisen.io'
-param crmRedirectUris string = 'https://crm.demeisen.io/crm/,https://mycroft.demeisen.io/crm/'
+param crmRedirectUris string = 'https://crm.demeisen.io/,https://crm.demeisen.io/crm/,https://mycroft.demeisen.io/crm/'
 
 var sfx = take(uniqueString(resourceGroup().id), 8)
 var tags = { system: 'demeisen-v2', app: 'platform', managedBy: 'platform/infra/azure/app.bicep' }

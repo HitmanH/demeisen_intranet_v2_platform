@@ -2,7 +2,7 @@
 
 **Azure is the live system since the cut-over on 2026-11-20 (about 01:08 UTC):**
 https://demeisen-v2-ddacbfayfrb7g9ge.z03.azurefd.net (intranet at `/`, CRM at `/crm/`), moving to
-https://mycroft.demeisen.io (see "Own names" below); the CRM is also at its own address, https://crm.demeisen.io/crm/.
+https://mycroft.demeisen.io (see "Own names" below); the CRM is also at its own address, https://crm.demeisen.io.
 The old AWS address (d1o33fjv6i8x8t.cloudfront.net) redirects there. AWS v2 is frozen, unchanged, as the fallback.
 Sign-in stays on the Demeisen Cognito pool (username, password, 2FA) by decision; it is the one AWS piece kept.
 
@@ -39,8 +39,9 @@ account and Key Vault. All templates are in this repo
 `demeisen.io` is registered at Porkbun (kept apart from the public demeisen.co.uk). Its DNS: `mycroft` and `crm` are
 CNAMEs to the front door's endpoint; `_dnsauth.*` TXT records prove ownership to Front Door; `v=spf1 -all` and
 `_dmarc` (`p=reject`) because the domain sends no email. Front Door issues and renews the certificates.
-The CRM is at `mycroft.demeisen.io/crm/` and at its own `crm.demeisen.io/crm/` (`crm.demeisen.io` alone redirects
-there). The CRM signs in with its own Cognito client and keeps its token per address, so each address has its own
+The CRM is at `mycroft.demeisen.io/crm/` and at its own `crm.demeisen.io` (the whole name goes to the CRM app, which
+serves the CRM at `/` there and signs in through mycroft's own sign-in; old `crm.demeisen.io/crm/` links still work).
+On mycroft the CRM signs in with its own Cognito client and keeps its token per address, so each address has its own
 sign-in; its client accepts both (SSM `/demeisen/v2/azure/url` and `/demeisen/v2/azure/crm-url`, read by the CRM's
 AWS app stack). To move the CRM's address: change `crm-url`, run the CRM's AWS **Deploy**, then `custom-domains.sh attach`.
 
@@ -94,7 +95,7 @@ setup link (24 hours) and the person sets their own password and scans their own
 2. Cloud Shell: `bash own-signin.sh trial` (ops/azure). Creates `platform-accounts-key` and `platform-oidc-signing-key`
    in Key Vault, switches it on. Nothing changes for anyone else: mycroft still goes to Cognito by default.
 3. Russell: Settings > Users > *Setup link* on his own row; open it, set password, scan the code.
-   Then sign out and use https://mycroft.demeisen.io/signin, and the CRM at https://crm.demeisen.io/crm/.
+   Then sign out and use https://mycroft.demeisen.io/signin, and the CRM at https://crm.demeisen.io.
    (crm.demeisen.io signs in through mycroft; anyone without their own sign-in yet is passed on to Cognito.)
 4. When it's right: setup link for Richard, then `bash own-signin.sh everyone`. Later: retire the Cognito pool.
    `bash own-signin.sh off` goes back to Cognito only at any point.
