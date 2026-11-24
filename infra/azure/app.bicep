@@ -28,6 +28,8 @@ param ownSignin bool = false
 param signinDefault string = 'cognito'
 param signinIssuer string = 'https://mycroft.demeisen.io'
 param crmRedirectUris string = 'https://crm.demeisen.io/,https://crm.demeisen.io/crm/,https://mycroft.demeisen.io/crm/'
+@description('The address people see for sign-in and setup links (the front door also serves the sign-in pages there)')
+param signinUrl string = 'https://crm.demeisen.io'
 
 var sfx = take(uniqueString(resourceGroup().id), 8)
 var tags = { system: 'demeisen-v2', app: 'platform', managedBy: 'platform/infra/azure/app.bicep' }
@@ -113,6 +115,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (enableWeb) {
           { name: 'LOCAL_SIGNIN', value: '1' }
           { name: 'SIGNIN_DEFAULT', value: signinDefault }
           { name: 'LOCAL_ISSUER', value: signinIssuer }
+          { name: 'SIGNIN_URL', value: signinUrl }
           { name: 'CRM_REDIRECT_URIS', value: crmRedirectUris }
           { name: 'ACCOUNTS_KEY', secretRef: 'accounts-key' }
           { name: 'OIDC_SIGNING_KEY', secretRef: 'oidc-signing-key' }
