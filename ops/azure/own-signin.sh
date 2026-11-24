@@ -49,7 +49,7 @@ apply() {  # $1 ownSignin true|false   $2 signinDefault cognito|local   $3 CRM h
 check() {
   sleep 30
   log "Checks (expect 200 each):"
-  for u in "$HUB/healthz" "$HUB/signin" "$HUB/.well-known/openid-configuration" "$HUB/oauth2/jwks" "https://crm.demeisen.io/crm/"; do
+  for u in "$HUB/healthz" "$HUB/signin" "$HUB/.well-known/openid-configuration" "$HUB/oauth2/jwks" "https://crm.demeisen.io/" "https://crm.demeisen.io/signin"; do
     echo "  $(curl -s -o /dev/null -w '%{http_code}' "$u")  $u"
   done
 }
@@ -57,7 +57,7 @@ check() {
 case "${1:-}" in
   trial)    keys; apply true cognito crm.demeisen.io; check
             log "Next: sign in at $HUB as usual, open Settings > Users, press 'Setup link' on your own row and open it." ;;
-  everyone) keys; apply true local '*'; check ;;
+  everyone) keys; apply true local '*,crm.demeisen.io'; check ;;
   off)      apply false cognito ''; log "Own sign-in is off; Cognito only." ;;
   *) echo "usage: bash own-signin.sh trial|everyone|off"; exit 2 ;;
 esac
