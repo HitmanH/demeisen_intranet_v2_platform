@@ -167,5 +167,24 @@ resource crmRoot 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-02-01' = if (c
   }
 }
 
+// crm.demeisen.io: the sign-in pages go to the intranet app, so people sign in (and set up) on the CRM's own address.
+// More specific than crmroot's /*, so these paths win.
+resource crmSignin 'Microsoft.Cdn/profiles/afdEndpoints/routes@2024-02-01' = if (connect && !empty(crmDomain)) {
+  parent: endpoint
+  name: 'crmsignin'
+  dependsOn: [crmRoot]
+  properties: {
+    originGroup: { id: groups[1].id }
+    ruleSets: [{ id: ruleSet.id }]
+    customDomains: [{ id: domains[length(domainList) - 1].id }]
+    supportedProtocols: ['Http', 'Https']
+    patternsToMatch: ['/signin', '/signin/*', '/setup/*', '/oauth2/*', '/static/*']
+    forwardingProtocol: 'HttpsOnly'
+    httpsRedirect: 'Enabled'
+    linkToDefaultDomain: 'Disabled'
+    enabledState: 'Enabled'
+  }
+}
+
 output url string = empty(mainDomain) ? 'https://${endpoint.properties.hostName}' : 'https://${mainDomain}'
 output defaultUrl string = 'https://${endpoint.properties.hostName}'
