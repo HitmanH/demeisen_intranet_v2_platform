@@ -180,3 +180,26 @@ def test_browser_that_used_own_signin_is_sent_back_to_it(c, monkeypatch):
             assert core.sign_in_url("/x").startswith("/auth/login")   # other browsers (Richard) keep the previous sign-in
         finally:
             del c.app.extensions["demeisen_oidc"]
+
+
+def test_crm_people_never_see_the_intranet_address(c, monkeypatch):
+    from portal import core
+    monkeypatch.setenv("SIGNIN_URL", "https://crm.demeisen.io")
+    old_login(c)
+    tok, _ = csrf(c, "/settings/users")
+    html = c.post("/settings/users", data={"csrf": tok, "action": "link", "uid": 2}).get_data(as_text=True)
+    assert "https://crm.demeisen.io/setup/" in html and "mycroft.demeisen.io/setup" not in html
+    fresh(c)
+    oidc = type("O", (), {"login_url": lambda self, n: "https://mycroft.demeisen.io/auth/login?next=" + n, "email": lambda self: None})()
+    monkeypatch.setenv("SIGNIN_DEFAULT", "cognito")
+    c.app.extensions["demeisen_oidc"] = oidc
+    try:
+        crm = {"X-Forwarded-Host": "crm.demeisen.io"}
+        with c.app.test_request_context("/oauth2/authorize", headers=crm):
+            assert core.sign_in_url("/oauth2/authorize").startswith("/signin")     # never the previous sign-in there
+        page = c.get("/signin", headers=crm).get_data(as_text=True)
+        assert "mycroft" not in page and "previous sign-in" not in page
+        with c.app.test_request_context("/x", headers={"X-Forwarded-Host": "mycroft.demeisen.io"}):
+            assert "auth/login" in core.sign_in_url("/x")                          # the intranet's address is unchanged
+    finally:
+        del c.app.extensions["demeisen_oidc"]

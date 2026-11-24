@@ -65,6 +65,20 @@ def cognito():
     return current_app.extensions.get("demeisen_oidc")
 
 
+def people_url():
+    """The address people see for sign-in and setup links (SIGNIN_URL, e.g. https://crm.demeisen.io); the intranet's
+    own address (the issuer) only if that isn't set."""
+    return os.environ.get("SIGNIN_URL", "").rstrip("/") or issuer()
+
+
+def on_people_address():
+    """True on the people-facing address (crm.demeisen.io): sign-in there never shows or sends people to the intranet's
+    address or the previous (Cognito) sign-in. The front door passes the address on as X-Forwarded-Host."""
+    target = urllib.parse.urlparse(os.environ.get("SIGNIN_URL", "")).hostname
+    shown = (request.headers.get("X-Forwarded-Host") or request.host or "").split(",")[0].strip().split(":")[0].lower()
+    return bool(target) and shown == target.lower()
+
+
 def crm_redirects():
     return [u.strip() for u in os.environ.get("CRM_REDIRECT_URIS", "").split(",") if u.strip()]
 
@@ -193,6 +207,7 @@ def signin():
 
 def _prev(nxt):
     o = cognito()
+    if on_people_address(): return None
     return o.login_url(nxt) if o is not None and hasattr(o, "login_url") else None
 
 
@@ -288,7 +303,7 @@ def new_setup_link(uid):
                          pending_secret=null, failed=0, locked_until=null where user_id=?""",
                       (h(token), iso(now() + timedelta(hours=SETUP_HOURS)), uid))
     core.db().commit()
-    return f"{issuer()}/setup/{token}"
+    return f"{people_url()}/setup/{token}"
 
 
 # ---------------------------------------------------------------- Settings -> Users (administrators)
