@@ -10,6 +10,7 @@ COPY portal ./portal
 COPY mnda ./mnda
 COPY memo ./memo
 COPY documents ./documents
+COPY contracts ./contracts
 ADD https://truststore.pki.rds.amazonaws.com/eu-west-2/eu-west-2-bundle.pem /app/rds-ca.pem
 RUN chmod -R a+rX /app && python -m compileall -q /app
 # Lambda: only /tmp is writable

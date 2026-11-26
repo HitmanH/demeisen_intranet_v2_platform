@@ -25,7 +25,7 @@ APPS = [
 ]
 
 # Functions hosted by the portal, in menu order. Each is a folder with a register(registry) function.
-FUNCTIONS = [f for f in os.environ.get("PLATFORM_FUNCTIONS", "mnda,memo,documents").split(",") if f]
+FUNCTIONS = [f for f in os.environ.get("PLATFORM_FUNCTIONS", "mnda,memo,documents,contracts").split(",") if f]
 
 # Home page tiles
 LINKS = [

@@ -46,6 +46,18 @@ def put(kind, path):
         s3().upload_file(path, BUCKET, key)
 
 
+def get(kind, name, dest):
+    """Copy a stored file back into a local path (e.g. when another container saved it)."""
+    key = f"{kind}/{name}"
+    if AZURE_ACCOUNT:
+        with open(dest, "wb") as f:
+            blob().get_blob_client("files", key).download_blob().readinto(f)
+    elif BUCKET:
+        s3().download_file(BUCKET, key, dest)
+    else:
+        raise FileNotFoundError(key)
+
+
 def download_url(kind, name):
     return s3().generate_presigned_url("get_object", ExpiresIn=300, Params={
         "Bucket": BUCKET, "Key": f"{kind}/{name}",

@@ -5,7 +5,7 @@ name: Deploy
 on:
   push:
     branches: [main]
-    paths: ['portal/**', 'mnda/**', 'memo/**', 'documents/**', 'infra/**', '!infra/azure/**', 'Dockerfile', 'requirements.txt', '.github/workflows/deploy.yml']
+    paths: ['portal/**', 'mnda/**', 'memo/**', 'documents/**', 'contracts/**', 'infra/**', '!infra/azure/**', 'Dockerfile', 'requirements.txt', '.github/workflows/deploy.yml']
   workflow_dispatch:
 permissions: { id-token: write, contents: read }
 concurrency: deploy

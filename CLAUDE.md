@@ -1,6 +1,6 @@
 # demeisen_intranet_v2_platform: notes for Claude sessions
 
-Portal + functions (mnda, memo, documents) + the front door. Read README.md and ops/RUNBOOK.md first.
+Portal + functions (mnda, memo, documents, contracts) + the front door. Read README.md and ops/RUNBOOK.md first.
 
 ## Rules
 - Data lives in `data/data.yaml` (stack `demeisen-v2-platform-data`). Never remove `DeletionPolicy`,

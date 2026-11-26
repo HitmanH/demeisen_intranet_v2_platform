@@ -1,0 +1,3 @@
+<div class="card"><h2>Recent contract reviews</h2><table>{% for c in rows %}
+<tr><td><a href="/contracts/{{ c.id }}">{{ c.counterparty or c.src_name }}</a></td><td>{{ categories[c.category] }}</td>
+<td>{% include "contracts/_status.html" %}</td></tr>{% endfor %}</table></div>

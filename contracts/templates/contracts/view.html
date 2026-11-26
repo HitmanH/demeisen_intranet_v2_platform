@@ -1,0 +1,49 @@
+{% extends "base.html" %}{% block title %}{{ c.ref }}{% endblock %}{% block body %}
+{% if c.status == 'running' and not c.stale %}<meta http-equiv="refresh" content="6">{% endif %}
+<h1>{{ c.counterparty or c.src_name }} {% include "contracts/_status.html" %}</h1>
+<p class="small">{{ c.ref }} · {{ categories[c.category] }} · <a href="/files/uploads/{{ c.stored }}">{{ c.src_name }}</a> · uploaded {{ c.created|fromiso }} by {{ c.author }}{% if c.reviewed %} · reviewed {{ c.reviewed|fromiso }}{% if c.pages %}, {{ c.pages }} pages{% endif %}{% endif %}</p>
+
+{% if c.status == 'running' and not c.stale %}<div class="card alert"><h2>Reviewing…</h2><p>Claude is reading the document. This page refreshes by itself; it usually takes one to three minutes.</p></div>
+{% elif c.error %}<div class="flash error">{{ c.error }}{% if c.stale %} (the review was interrupted){% endif %}</div>
+{% elif c.stale %}<div class="flash error">The review was interrupted. Run it again.</div>{% endif %}
+
+{% if r %}{% set o = r.overview %}
+<div class="card"><h2>Overview</h2><p>{{ o.summary }}</p>
+<table><tr><th>Document</th><td>{{ o.document_type }}</td></tr>
+<tr><th>Parties</th><td>{% for p in o.parties %}{{ p.name }} <small>({{ p.role }})</small>{% if not loop.last %}<br>{% endif %}{% endfor %}</td></tr>
+<tr><th>Our position</th><td>{{ o.demeisen_position }}</td></tr><tr><th>Dates</th><td>{{ o.dates }}</td></tr>
+<tr><th>Law &amp; courts</th><td>{{ o.governing_law }}</td></tr>
+<tr><th>Recommendation</th><td><b>{{ o.recommendation }}</b></td></tr></table></div>
+
+{% macro rows3(items, a, b, c3, ha, hb, hc) %}<table><tr><th>{{ ha }}</th><th>{{ hb }}</th><th>{{ hc }}</th></tr>
+{% for x in items %}<tr><td>{{ x[a] }}</td><td>{{ x[b] }}</td><td>{{ x[c3] }}</td></tr>{% else %}<tr><td colspan="3">None found.</td></tr>{% endfor %}</table>{% endmacro %}
+
+<div class="card"><h2>Terms to push back on</h2>
+{% for x in r.concerns %}{% set cls = {'high': 's-rejected', 'medium': 's-awaiting', 'low': 's-approved'}[x.severity] %}
+<div class="concern"><h3><span class="pill {{ cls }}">{{ x.severity|capitalize }}</span> {{ x.title }} <small>{{ x.clause }}</small></h3>
+<p>{{ x.issue }}</p><p><b>Why it matters:</b> {{ x.why_it_matters }}</p><p><b>Ask for:</b> {{ x.suggested_change }}</p></div>
+{% else %}<p>Nothing off-market found.</p>{% endfor %}
+{% if r.missing %}<h3>Missing protections</h3><table>{% for x in r.missing %}<tr><td>{{ x.item }}</td><td>{{ x.why }}</td></tr>{% endfor %}</table>{% endif %}</div>
+
+<div class="card"><h2>Money and liability</h2><p>{{ r.financial.summary }}</p>
+<h3>Fees and costs</h3>{{ rows3(r.financial.fees, 'item', 'clause', 'detail', 'Item', 'Clause', 'Detail') }}
+<h3>Liability, caps and indemnities</h3>{{ rows3(r.financial.liability, 'item', 'clause', 'detail', 'Item', 'Clause', 'Detail') }}</div>
+
+<div class="card"><h2>Term and termination</h2><p>{{ r.termination.summary }}</p>
+{{ rows3(r.termination.provisions, 'item', 'clause', 'detail', 'Provision', 'Clause', 'Detail') }}
+{% if r.termination.key_dates %}<h3>Dates to diary</h3><table>{% for x in r.termination.key_dates %}<tr><td>{{ x.when }}</td><td>{{ x.what }}</td></tr>{% endfor %}</table>{% endif %}</div>
+
+<div class="card"><h2>Key terms</h2>{{ rows3(r.key_terms, 'term', 'clause', 'summary', 'Term', 'Clause', 'Summary') }}</div>
+<div class="card"><h2>Drafting errors</h2>{{ rows3(r.drafting_errors, 'clause', 'issue', 'fix', 'Clause', 'Issue', 'Fix') }}</div>
+<p class="small">First-read review by {{ c.model }}. Not legal advice: have counsel check anything you rely on.</p>
+{% endif %}
+
+<div class="two"><form method="post" class="card"><h2>Details</h2><input type="hidden" name="action" value="details">
+<label>Category<select name="category">{% for k, v in categories.items() %}<option value="{{ k }}"{% if k == c.category %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+<label>Counterparty<input name="counterparty" value="{{ c.counterparty or '' }}"></label>
+<label>Context<textarea name="context" rows="3">{{ c.context or '' }}</textarea></label><button class="secondary">Save details</button></form>
+<div class="card"><h2>Review</h2>{% if c.status == 'running' and not c.stale %}<p>Running…</p>
+{% elif configured %}<form method="post"><input type="hidden" name="action" value="rerun"><button>{{ 'Run the review again' if r else 'Run review' }}</button></form>
+{% else %}<p class="small">Reviews switch on once the Claude API key is set.</p>{% endif %}
+<h3>History</h3><table>{% for a in log %}<tr><td>{{ a.at|fromiso }}</td><td>{{ a.name or '' }}</td><td>{{ a.action }}</td><td>{{ a.detail }}</td></tr>{% endfor %}</table></div></div>
+{% endblock %}
