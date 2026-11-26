@@ -10,6 +10,7 @@ COPY portal ./portal
 COPY mnda ./mnda
 COPY memo ./memo
 COPY documents ./documents
+COPY contracts ./contracts
 RUN useradd --create-home --uid 10001 app && mkdir -p /tmp/data && chown app /tmp/data && python -m compileall -q /app
 USER app
 # Azure Database for MySQL certificates chain to public roots (DigiCert Global Root G2 / Microsoft RSA Root 2017),

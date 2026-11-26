@@ -30,6 +30,9 @@ param signinIssuer string = 'https://mycroft.demeisen.io'
 param crmRedirectUris string = 'https://crm.demeisen.io/,https://crm.demeisen.io/crm/,https://mycroft.demeisen.io/crm/'
 @description('The address people see for sign-in and setup links (the front door also serves the sign-in pages there)')
 param signinUrl string = 'https://crm.demeisen.io'
+// Contract review (contracts/): the Claude API key, from Key Vault secret anthropic-api-key. Without it, documents
+// can still be uploaded but are not reviewed.
+param contractReview bool = false
 
 var sfx = take(uniqueString(resourceGroup().id), 8)
 var tags = { system: 'demeisen-v2', app: 'platform', managedBy: 'platform/infra/azure/app.bicep' }
@@ -97,6 +100,8 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (enableWeb) {
       ], empty(originVerify) ? [] : [{ name: 'origin-verify', value: originVerify }], !ownSignin ? [] : [
         { name: 'accounts-key', keyVaultUrl: '${kvUri}secrets/platform-accounts-key', identity: appId.id }
         { name: 'oidc-signing-key', keyVaultUrl: '${kvUri}secrets/platform-oidc-signing-key', identity: appId.id }
+      ], !contractReview ? [] : [
+        { name: 'anthropic-api-key', keyVaultUrl: '${kvUri}secrets/anthropic-api-key', identity: appId.id }
       ])
     }
     template: {
@@ -119,7 +124,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (enableWeb) {
           { name: 'CRM_REDIRECT_URIS', value: crmRedirectUris }
           { name: 'ACCOUNTS_KEY', secretRef: 'accounts-key' }
           { name: 'OIDC_SIGNING_KEY', secretRef: 'oidc-signing-key' }
-        ])
+        ], !contractReview ? [] : [{ name: 'ANTHROPIC_API_KEY', secretRef: 'anthropic-api-key' }])
         probes: [{ type: 'Liveness', httpGet: { path: '/healthz', port: 8080 }, periodSeconds: 30, initialDelaySeconds: 10 }]
       }]
       scale: { minReplicas: 0, maxReplicas: 2 }

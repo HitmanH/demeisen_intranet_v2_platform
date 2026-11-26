@@ -27,3 +27,7 @@ h1 .btn { font-family: var(--f-body); font-size: 14px; }
 .onenda { height: 28px; display: block; margin-bottom: 8px; background: #fff; padding: 4px 6px; border-radius: 4px; }
 .loginlogo { width: 56px; height: 56px; margin: 0 auto 12px; display: block; color: var(--ink); }
 .narrow h1 { justify-content: center; }
+.concern { border-top: 1px solid var(--line); padding: 12px 0 4px; } .concern:first-of-type { border-top: 0; padding-top: 0; }
+.concern h3 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.concern p { margin: 4px 0; } .card h3 { margin: 14px 0 8px; }
+.scroll { overflow-x: auto; max-width: 100%; }

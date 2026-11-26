@@ -6,7 +6,7 @@ name: Deploy (Azure)
 on:
   push:
     branches: [main]
-    paths: ['portal/**', 'mnda/**', 'memo/**', 'documents/**', 'infra/azure/**', 'Dockerfile.azure', 'requirements*.txt', '.github/workflows/deploy-azure.yml']
+    paths: ['portal/**', 'mnda/**', 'memo/**', 'documents/**', 'contracts/**', 'infra/azure/**', 'Dockerfile.azure', 'requirements*.txt', '.github/workflows/deploy-azure.yml']
   workflow_dispatch:
 permissions: { id-token: write, contents: read }
 concurrency: deploy-azure

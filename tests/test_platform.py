@@ -13,9 +13,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("PLATFORM_DATA", str(tmp_path))
     for k in ("DB_HOST", "OIDC", "OIDC_ISSUER", "OIDC_SECRET_NAME", "FILES_BUCKET", "AUDIT_BUCKET", "AUTH_ONLY", "ORIGIN_VERIFY",
               "PLATFORM_CLOUD", "AZURE_STORAGE_ACCOUNT", "INTRANET_SECRET", "DB_PASSWORD", "DB_MIGRATOR_PASSWORD", "LOCAL_SIGNIN",
-              "SIGNIN_DEFAULT", "LOCAL_ISSUER", "CRM_REDIRECT_URIS", "OIDC_SIGNING_KEY", "ACCOUNTS_KEY"):
+              "SIGNIN_DEFAULT", "LOCAL_ISSUER", "CRM_REDIRECT_URIS", "OIDC_SIGNING_KEY", "ACCOUNTS_KEY",
+              "ANTHROPIC_API_KEY"):
         monkeypatch.delenv(k, raising=False)
-    for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents")]:
+    for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents", "contracts")]:
         del sys.modules[m]
     from portal.app import create_app
     app = create_app()
@@ -34,7 +35,7 @@ def test_sign_in_required_and_home(client):
     assert client.get("/").status_code == 302
     login(client)
     html = client.get("/").get_data(as_text=True)
-    for label in ("NDAs", "Memos", "Issue document", "Verify", "Audit", "New Mutual NDA", "New expenditure memo"):
+    for label in ("NDAs", "Memos", "Issue document", "Verify", "Audit", "New Mutual NDA", "New expenditure memo", "Contracts"):
         assert label in html
     assert 'href="/crm/"' in html   # the Demeisen bar links to the CRM behind the same front door
 
@@ -44,7 +45,7 @@ def test_one_database_same_tables_as_v1(client):
     con = sqlite3.connect(os.path.join(client.tmp, "intranet.db"))
     tables = {r[0] for r in con.execute("select name from sqlite_master where type='table'")}
     assert {"users", "ndas", "issues", "memos", "signoffs", "audit"} <= tables
-    assert tables - {"users", "ndas", "issues", "memos", "signoffs", "audit"} == {"schema_migrations", "accounts", "oauth_codes"}
+    assert tables - {"users", "ndas", "issues", "memos", "signoffs", "audit"} - {"contracts"} == {"schema_migrations", "accounts", "oauth_codes"}
 
 
 def test_memo_sign_off_by_every_member(client):
@@ -108,7 +109,7 @@ def test_functions_touch_only_their_own_tables():
     """Each function's SQL may name only its own tables, plus `users` and `audit` (shared by the portal)."""
     from portal.dbconn import TABLE_OWNERS
     shared = {"users", "audit"}
-    for module in ("mnda", "memo", "documents"):
+    for module in ("mnda", "memo", "documents", "contracts"):
         src = open(os.path.join(ROOT, module, "__init__.py"), encoding="utf-8").read()
         used = set(re.findall(r"\b(?:from|into|update|join|table if not exists)\s+(\w+)", src, re.I))
         foreign = {t for t in used if t in TABLE_OWNERS and TABLE_OWNERS[t] not in (module, "portal")}
@@ -118,7 +119,7 @@ def test_functions_touch_only_their_own_tables():
 
 def test_origin_verify_blocks_direct_calls(tmp_path, monkeypatch):
     monkeypatch.setenv("PLATFORM_DATA", str(tmp_path)); monkeypatch.setenv("ORIGIN_VERIFY", "s3cret")
-    for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents")]:
+    for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents", "contracts")]:
         del sys.modules[m]
     from portal.app import create_app
     c = create_app().test_client()
@@ -138,7 +139,7 @@ def _fresh_app_module(monkeypatch, tmp_path, **env):
               "ORIGIN_VERIFY", "PLATFORM_CLOUD", "AZURE_STORAGE_ACCOUNT", "INTRANET_SECRET"):
         monkeypatch.delenv(k, raising=False)
     for k, v in env.items(): monkeypatch.setenv(k, v)
-    for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents")]:
+    for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents", "contracts")]:
         del sys.modules[m]
     from portal import app
     return app

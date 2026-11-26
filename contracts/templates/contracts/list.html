@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}Contracts{% endblock %}{% block body %}<h1>Contract review</h1>
+{% if not configured %}<div class="flash error">Reviews are not switched on yet: the Claude API key isn't set. Uploads are kept and can be reviewed once it is (see <code>contracts/README.md</code>).</div>{% endif %}
+<form method="post" enctype="multipart/form-data" class="card"><h2>Upload a document</h2>
+<p class="small">PDF or Word. Claude reads the whole document and returns: (a) drafting errors, (b) key terms, (c) terms to push back on, (d) money and liability, (e) term and termination. It takes a minute or two. This is a first read, not legal advice.</p>
+<div class="two"><label>Document (.pdf, .docx, .doc)<input type="file" name="file" accept=".pdf,.docx,.doc" required></label>
+<label>Category<select name="category" required>{% for k, v in categories.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></label>
+<label>Counterparty<input name="counterparty" placeholder="e.g. Millennium"></label>
+<label class="full">Context (optional): who they are, what we want from the deal, anything to watch<textarea name="context" rows="2" placeholder="e.g. Allocator we hope to receive an allocation from; we will share strategy and position data"></textarea></label></div>
+<button>Upload and review</button></form>
+
+<nav class="tabs scroll" aria-label="Categories" style="margin-bottom:12px">
+<a href="/contracts"{% if not current %} aria-current="page"{% endif %}>All ({{ counts.values()|sum }})</a>
+{% for k, v in categories.items() %}<a href="/contracts?category={{ k }}"{% if current == k %} aria-current="page"{% endif %}>{{ v }} ({{ counts.get(k, 0) }})</a>{% endfor %}</nav>
+<div class="scroll"><table><tr><th>Ref</th><th>Counterparty</th><th>Document</th><th>Category</th><th>Review</th><th>Concerns</th><th>Drafting errors</th><th>Uploaded</th><th>By</th></tr>
+{% for c in rows %}<tr><td><a href="/contracts/{{ c.id }}">{{ c.ref }}</a></td><td>{{ c.counterparty }}</td><td>{{ c.src_name }}</td>
+<td>{{ categories[c.category] }}</td><td>{% include "contracts/_status.html" %}</td>
+<td>{{ c.n_concerns if c.data else '' }}</td><td>{{ c.n_errors if c.data else '' }}</td><td>{{ c.created|fromiso }}</td><td>{{ c.author }}</td></tr>
+{% else %}<tr><td colspan="9">No documents{{ ' in this category' if current }} yet.</td></tr>{% endfor %}</table></div>{% endblock %}

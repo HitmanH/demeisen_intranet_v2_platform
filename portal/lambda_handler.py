@@ -35,6 +35,7 @@ APP_GRANTS = {
     "memos": "SELECT, INSERT, UPDATE",
     "signoffs": "SELECT, INSERT, UPDATE, DELETE",
     "issues": "SELECT, INSERT, UPDATE",
+    "contracts": "SELECT, INSERT, UPDATE",     # contract reviews (contracts/)
     "schema_migrations": "SELECT",
     "accounts": "SELECT, INSERT, UPDATE",          # own sign-in (accounts.py)
     "oauth_codes": "SELECT, INSERT, UPDATE, DELETE",

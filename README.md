@@ -9,6 +9,7 @@ CRM at one address.
 | `mnda/` | Mutual NDAs (oneNDA v2.1): Word + wordmarked PDF, status workflow, executed copies | `ndas` |
 | `memo/` | Expenditure memos: every member signs off, printable record | `memos`, `signoffs` |
 | `documents/` | Prospect-named documents, issue register, Verify | `issues` |
+| `contracts/` | Contract review with Claude: drafting errors, key terms, concerns, money/liability, termination (`contracts/README.md`) | `contracts` |
 | `data/` | **data stack** `demeisen-v2-platform-data`: private network, RDS instance, files bucket, write-once audit bucket, AWS Backup | |
 | `infra/` | **app stack** `demeisen-v2-platform-app`: the three functions and the CloudFront front door | |
 | `ops/` | one-time set-up, copying v1, database bootstrap, and `RUNBOOK.md` | |

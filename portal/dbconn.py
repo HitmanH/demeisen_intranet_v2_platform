@@ -1,7 +1,7 @@
 """Tiny DB layer for the platform: SQLite locally, MySQL (RDS) when DB_HOST is set.
 
 One database, `intranet`, exactly as in v1 (same tables, rows and IDs). Each function owns its own tables and touches
-no others: portal `users`, `audit`; mnda `ndas`; memo `memos`, `signoffs`; documents `issues`.
+no others: portal `users`, `audit`; mnda `ndas`; memo `memos`, `signoffs`; documents `issues`; contracts `contracts`.
 App code keeps sqlite-style SQL (? placeholders, `insert or ignore`, `insert or replace`); it is translated for MySQL.
 
 On RDS the app signs in as `platform_app` with a short-lived IAM token, so no database password is stored anywhere.
@@ -11,7 +11,8 @@ server certificate is checked against the public CA certificates (DB_SSL_CA).
 import os, re, sqlite3, time
 
 MYSQL = bool(os.environ.get("DB_HOST"))
-TABLE_OWNERS = {"users": "portal", "audit": "portal", "ndas": "mnda", "memos": "memo", "signoffs": "memo", "issues": "documents"}
+TABLE_OWNERS = {"users": "portal", "audit": "portal", "ndas": "mnda", "memos": "memo", "signoffs": "memo", "issues": "documents",
+                "contracts": "contracts"}
 _TOKEN = {"value": None, "at": 0.0}
 
 

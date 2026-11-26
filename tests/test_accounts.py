@@ -19,7 +19,7 @@ def c(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_SIGNIN", "1")
     monkeypatch.setenv("LOCAL_ISSUER", "https://mycroft.demeisen.io")
     monkeypatch.setenv("CRM_REDIRECT_URIS", CRM_CB + ",https://mycroft.demeisen.io/crm/")
-    for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents")]:
+    for m in [m for m in sys.modules if m.split(".")[0] in ("portal", "mnda", "memo", "documents", "contracts")]:
         del sys.modules[m]
     from portal.app import create_app
     app = create_app(); app.config["TESTING"] = True

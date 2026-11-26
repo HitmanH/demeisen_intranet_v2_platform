@@ -1,0 +1,7 @@
+{%- if c.status == 'done' -%}
+  {%- set cls = {'high': 's-rejected', 'medium': 's-awaiting', 'low': 's-approved'}[c.risk] if c.risk in ('high','medium','low') else '' -%}
+  <span class="pill {{ cls }}">{{ (c.risk or 'reviewed')|capitalize }} risk</span>{% if c.n_high %} <small>{{ c.n_high }} high</small>{% endif %}
+{%- elif c.status == 'running' and not c.stale -%}<span class="pill s-awaiting">Reviewing…</span>
+{%- elif c.status == 'running' -%}<span class="pill s-rejected">Interrupted</span>
+{%- elif c.status == 'failed' -%}<span class="pill s-rejected">Failed</span>
+{%- else -%}<span class="pill">Waiting</span>{%- endif -%}

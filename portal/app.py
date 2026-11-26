@@ -1,5 +1,5 @@
 """Demeisen platform: the portal (sign-in, home, people, audit, files) hosting the functions listed in
-config.FUNCTIONS. Each function is a folder (mnda/, memo/, documents/) with its own blueprint, templates and schema.
+config.FUNCTIONS. Each function is a folder (mnda/, memo/, documents/, contracts/) with its own blueprint, templates and schema.
 
     create_app()          the web app (local: python -m portal.app; on AWS: portal/lambda_handler.py)
 """
