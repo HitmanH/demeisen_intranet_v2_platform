@@ -19,10 +19,10 @@ STALE_MINUTES = 20      # a review "running" for longer than this was interrupte
 MIGRATIONS = [
     ("001_contracts", {
         "sqlite": """create table if not exists contracts(id integer primary key, ref text, category text,
-  counterparty text, context text, src_name text, stored text, sha text, status text, review text, error text,
+  counterparty text, context text, src_name text, file_name text, sha text, status text, review text, error text,
   model text, pages int, tokens_in int, tokens_out int, started text, reviewed text, created_by int, created text)""",
         "mysql": """create table if not exists contracts(id int auto_increment primary key, ref varchar(64),
-  category varchar(32), counterparty text, context text, src_name text, stored text, sha varchar(64),
+  category varchar(32), counterparty text, context text, src_name text, file_name text, sha varchar(64),
   status varchar(16), review mediumtext, error text, model varchar(64), pages int, tokens_in int, tokens_out int,
   started varchar(32), reviewed varchar(32), created_by int, created varchar(32), index(ref), index(category))"""}),
 ]
@@ -74,7 +74,7 @@ def index():
         stored = secure_filename(f"{ref}_{f.filename}")
         path = os.path.join(core.UPL, stored); f.save(path); storage.put("uploads", path)
         cur = db().execute(
-            "insert into contracts(ref,category,counterparty,context,src_name,stored,sha,status,created_by,created) "
+            "insert into contracts(ref,category,counterparty,context,src_name,file_name,sha,status,created_by,created) "
             "values(?,?,?,?,?,?,?,?,?,?)",
             (ref, category, request.form.get("counterparty", "").strip(), request.form.get("context", "").strip(),
              f.filename, stored, doctools.sha256(path), "queued", session["uid"], now()))
@@ -158,10 +158,10 @@ def _review_in_background(app, cid):
 def _as_pdf(row, tmp):
     """The original as a local PDF: fetched from the files store if this container doesn't have it, and converted
     with LibreOffice if it is a Word document."""
-    src = os.path.join(core.UPL, row["stored"])
+    src = os.path.join(core.UPL, row["file_name"])
     if not os.path.exists(src):
         if not storage.REMOTE: raise engine.ReviewError("The uploaded file is missing.")
-        storage.get("uploads", row["stored"], src)
+        storage.get("uploads", row["file_name"], src)
     if src.lower().endswith(".pdf"): return src
     try:
         return doctools.docx_to_pdf(src, tmp)
