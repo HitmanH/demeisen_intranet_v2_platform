@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block title %}{{ c.ref }}{% endblock %}{% block body %}
 {% if c.status == 'running' and not c.stale %}<meta http-equiv="refresh" content="6">{% endif %}
 <h1>{{ c.counterparty or c.src_name }} {% include "contracts/_status.html" %}</h1>
-<p class="small">{{ c.ref }} · {{ categories[c.category] }} · <a href="/files/uploads/{{ c.stored }}">{{ c.src_name }}</a> · uploaded {{ c.created|fromiso }} by {{ c.author }}{% if c.reviewed %} · reviewed {{ c.reviewed|fromiso }}{% if c.pages %}, {{ c.pages }} pages{% endif %}{% endif %}</p>
+<p class="small">{{ c.ref }} · {{ categories[c.category] }} · <a href="/files/uploads/{{ c.file_name }}">{{ c.src_name }}</a> · uploaded {{ c.created|fromiso }} by {{ c.author }}{% if c.reviewed %} · reviewed {{ c.reviewed|fromiso }}{% if c.pages %}, {{ c.pages }} pages{% endif %}{% endif %}</p>
 
 {% if c.status == 'running' and not c.stale %}<div class="card alert"><h2>Reviewing…</h2><p>Claude is reading the document. This page refreshes by itself; it usually takes one to three minutes.</p></div>
 {% elif c.error %}<div class="flash error">{{ c.error }}{% if c.stale %} (the review was interrupted){% endif %}</div>
